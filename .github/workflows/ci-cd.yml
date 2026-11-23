@@ -100,7 +100,7 @@ jobs:
       - name: Verify the deployed commit
         if: steps.deploy.outputs.enabled == 'true'
         env:
-          IMS_PUBLIC_URL: ${{ vars.IMS_PUBLIC_URL || 'https://neurolinx.in/inventory-management-system' }}
+          IMS_PUBLIC_URL: ${{ vars.IMS_PUBLIC_URL || 'https://neurolinx.in/IMS' }}
         run: |
           [[ "$IMS_PUBLIC_URL" == https://* ]] || { echo "IMS_PUBLIC_URL must use HTTPS." >&2; exit 1; }
           base="${IMS_PUBLIC_URL%/}"

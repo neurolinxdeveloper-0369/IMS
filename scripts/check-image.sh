@@ -17,19 +17,19 @@ for attempt in {1..20}; do
   sleep 1
 done
 [[ "$(curl --fail --silent --show-error --max-time 5 "$base/health")" = "ok" ]]
-for route in /inventory-management-system /inventory-management-system/ /inventory-management-system/index.html; do
+for route in /IMS /IMS/ /IMS/index.html; do
   content=$(curl --fail --silent --show-error --max-time 5 "$base$route")
   [[ "$content" == *'<title>Welcome to Inventory Management System | Neurolinx</title>'* ]] || {
     echo "The welcome page did not render at $route." >&2; exit 1;
   }
 done
 for extension in js css; do
-  asset=$(printf '%s\n' "$content" | sed -nE "s|.*[\"](\/inventory-management-system\/assets\/[^\"]+\.$extension)\".*|\1|p")
+  asset=$(printf '%s\n' "$content" | sed -nE "s|.*[\"](\/IMS\/assets\/[^\"]+\.$extension)\".*|\1|p")
   [[ -n "$asset" ]] || { echo "Missing $extension asset in the welcome page." >&2; exit 1; }
   curl --fail --silent --show-error --max-time 5 --output /dev/null "$base$asset"
 done
-metadata=$(curl --fail --silent --show-error --max-time 5 "$base/inventory-management-system/version.json")
+metadata=$(curl --fail --silent --show-error --max-time 5 "$base/IMS/version.json")
 [[ "$(jq -r .service <<< "$metadata")" = "neurolinx-ims" ]]
 [[ "$(jq -r .commit <<< "$metadata")" = "$expected_commit" ]]
-[[ "$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' "$base/inventory-management-system/not-a-real-page")" = "404" ]]
+[[ "$(curl --silent --show-error --max-time 5 --output /dev/null --write-out '%{http_code}' "$base/IMS/not-a-real-page")" = "404" ]]
 echo "IMS image passed Nginx syntax, health, welcome routes, React assets, version and missing-page checks."
