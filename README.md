@@ -45,8 +45,9 @@ For the example repository, the image is `ghcr.io/neurolinxdeveloper-0369/ims:la
 
 1. Create a **new Portainer stack named `ims`** using the Repository build method, this repository's HTTPS Git URL, `refs/heads/main`, and the Compose path `docker-compose.yml`.
 2. Enable GitOps updates using Polling. Portainer builds the image from its Git checkout when the tracked branch changes.
-3. Use the default loopback port `3060`, or set `IMS_PORT` to another available host port.
-4. Deploy the stack and wait for `neurolinx-ims` to become healthy.
+3. Set `IMS_DB_PASSWORD` to a random database password and `IMS_ADMIN_HASH` to the initial administrator's scrypt verifier. The verifier format is a 16-byte random salt in hex, a colon, and a 64-byte key derived with Node's default `scrypt` parameters in hex. Set `IMS_ADMIN_ID` to override the default administrator ID. The seed only inserts a missing account.
+4. Use the default application loopback port `3060`, or set `IMS_PORT` to another available host port. PostgreSQL uses loopback host port `5440` and a persistent volume.
+5. Deploy the stack and wait for the web, authentication and database containers to become healthy.
 
 The stack binds only `127.0.0.1:<IMS_PORT>`. CloudPanel on the same server provides public HTTPS. IMS has its own image and container, with no dependency on the company website or Neuro Series containers.
 

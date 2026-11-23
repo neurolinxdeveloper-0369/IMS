@@ -5,6 +5,15 @@ RUN npm ci
 COPY index.html vite.config.mjs welcome.jsx welcome.css ./
 RUN npm run build
 
+FROM node:24-alpine AS auth
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+COPY auth.mjs ./
+USER node
+CMD ["node", "auth.mjs"]
+
 FROM nginx:stable-alpine
 
 ARG SOURCE_COMMIT=local

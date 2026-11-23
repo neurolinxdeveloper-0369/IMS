@@ -1,14 +1,61 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './welcome.css'
 
 function WelcomePage() {
   const [status, setStatus] = useState('')
+  const [session, setSession] = useState(null)
+  const [pending, setPending] = useState(false)
 
-  function handleSignIn(event) {
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch('/IMS/api/session', { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((user) => { if (user) setSession(user) })
+      .catch(() => {})
+    return () => controller.abort()
+  }, [])
+
+  async function handleSignIn(event) {
     event.preventDefault()
-    setStatus('Sign-in is not available yet.')
+    const form = event.currentTarget
+    setPending(true)
+    setStatus('')
+    try {
+      const response = await fetch('/IMS/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      })
+      const result = await response.json()
+      if (response.ok) {
+        form.reset()
+        setSession(result)
+      } else {
+        setStatus(result.message || 'Sign-in is unavailable.')
+      }
+    } catch {
+      setStatus('Sign-in is unavailable. Try again shortly.')
+    } finally {
+      setPending(false)
+    }
   }
+
+  async function handleSignOut() {
+    setPending(true)
+    setStatus('')
+    try {
+      const response = await fetch('/IMS/api/logout', { method: 'POST' })
+      if (!response.ok) throw new Error('Sign-out failed')
+      setSession(null)
+    } catch {
+      setStatus('Sign-out is unavailable. Try again shortly.')
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const roleLabel = { admin: 'Admin', manager: 'Manager', store_person: 'Store Person' }
 
   return (
     <>
@@ -22,15 +69,24 @@ function WelcomePage() {
         </header>
         <main id="main" tabIndex={-1}>
           <section className="hero" aria-labelledby="sign-in-title">
-            <form className="sign-in" method="post" onSubmit={handleSignIn}>
+            {session ? (
+              <div className="sign-in">
+                <h1 id="sign-in-title">Inventory Management System</h1>
+                <p>Signed in as {session.userId} · {roleLabel[session.role]}</p>
+                <button type="button" onClick={handleSignOut} disabled={pending}>Sign out</button>
+                <div className="sign-in-status" role="status">{status}</div>
+              </div>
+            ) : (
+            <form className="sign-in" method="post" action="/IMS/api/login" onSubmit={handleSignIn}>
               <h1 id="sign-in-title">Account access</h1>
               <label htmlFor="user-id">User ID</label>
-              <input id="user-id" name="username" autoComplete="username" required />
+              <input id="user-id" name="username" autoComplete="username" maxLength={64} required />
               <label htmlFor="password">Password</label>
-              <input id="password" name="password" type="password" autoComplete="current-password" required />
-              <button type="submit">Sign in</button>
+              <input id="password" name="password" type="password" autoComplete="current-password" maxLength={256} required />
+              <button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Sign in'}</button>
               <div className="sign-in-status" role="status">{status}</div>
             </form>
+            )}
             <figure className="hero-art" aria-hidden="true">
               <svg className="workspace-art" viewBox="0 0 660 660" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <defs>
