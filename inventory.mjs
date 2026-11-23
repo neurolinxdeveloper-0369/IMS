@@ -1,0 +1,288 @@
+import { sections, canRead, canWrite } from './inventory-shared.mjs'
+
+export async function initInventory(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ims_records (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      kind text NOT NULL,
+      reference text NOT NULL,
+      body jsonb NOT NULL,
+      created_by text NOT NULL REFERENCES ims_users(user_id),
+      created_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(kind, reference)
+    );
+    CREATE TABLE IF NOT EXISTS ims_stock_ledger (
+      record_id bigint NOT NULL REFERENCES ims_records(id),
+      item_id bigint NOT NULL REFERENCES ims_records(id),
+      quantity numeric(18,3) NOT NULL CHECK (quantity <> 0),
+      PRIMARY KEY(record_id, item_id)
+    );
+    CREATE INDEX IF NOT EXISTS ims_stock_item_idx ON ims_stock_ledger (item_id);
+    CREATE TABLE IF NOT EXISTS ims_audit (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      actor text NOT NULL REFERENCES ims_users(user_id),
+      action text NOT NULL,
+      reference text NOT NULL,
+      happened_at timestamptz NOT NULL DEFAULT now()
+    );
+  `)
+}
+
+export class RequestError extends Error {
+  constructor(status, message) {
+    super(message)
+    this.status = status
+  }
+}
+
+function check(condition, message, status = 400) {
+  if (!condition) throw new RequestError(status, message)
+}
+
+export async function transaction(pool, work) {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const result = await work(client)
+    await client.query('COMMIT')
+    return result
+  } catch (error) {
+    await client.query('ROLLBACK')
+    if (error.code === '23505') throw new RequestError(409, 'That reference already exists.')
+    throw error
+  } finally {
+    client.release()
+  }
+}
+
+export function audit(db, actor, action, reference) {
+  return db.query('INSERT INTO ims_audit (actor, action, reference) VALUES ($1, $2, $3)', [actor, action, reference])
+}
+
+function numeric(value, label, decimals, allowZero = false) {
+  const pattern = new RegExp('^\\d{1,9}(?:\\.\\d{1,' + decimals + '})?$')
+  const amount = Number(value)
+  check(pattern.test(String(value)) && (allowZero ? amount >= 0 : amount > 0), label + ' is invalid.')
+  return amount
+}
+
+function fixed(value, scale = 1000) {
+  return Math.round(Number(value) * scale)
+}
+
+async function findRecord(db, kind, id) {
+  check(/^\d{1,18}$/.test(String(id)), 'Choose an existing ' + sections[kind].single + '.')
+  const { rows: [row] } = await db.query('SELECT id, body FROM ims_records WHERE kind = $1 AND id = $2', [kind, id])
+  check(row, 'The selected ' + sections[kind].single + ' no longer exists.', 409)
+  return { id: row.id, ...row.body }
+}
+
+function date(value, label) {
+  const parsed = new Date(value + 'T00:00:00Z')
+  check(/^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(+parsed)
+    && parsed.toISOString().slice(0, 10) === value, label + ' is invalid.')
+  return value
+}
+
+async function readFields(db, kind, input) {
+  const result = {}
+  for (const [key, label, type, optional] of sections[kind].fields) {
+    const value = typeof input[key] === 'string' ? input[key].trim() : ''
+    if (!value && optional) continue
+    check(value && value.length <= 240, label + ' is required and must be 240 characters or fewer.')
+    if (sections[type]) result[key] = (await findRecord(db, type, value)).id
+    else if (type === 'quantity') result[key] = numeric(value, label, 3, true)
+    else if (type === 'date') result[key] = date(value, label)
+    else {
+      if (type === 'email') check(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value), 'Enter a valid email address.')
+      result[key] = value
+    }
+  }
+  return result
+}
+
+async function readLines(db, input, prices) {
+  check(Array.isArray(input) && input.length > 0 && input.length <= 100, 'Add between 1 and 100 items.')
+  const seen = new Set()
+  const lines = []
+  for (const row of input) {
+    check(row && typeof row === 'object', 'An item line is invalid.')
+    const item = await findRecord(db, 'items', row.item)
+    check(!seen.has(item.id), 'Each item can appear only once per document.')
+    seen.add(item.id)
+    const line = { item: item.id, quantity: numeric(row.quantity, 'Quantity', 3) }
+    if (prices) line.price = numeric(row.price, 'Unit price', 2, true)
+    lines.push(line)
+  }
+  return lines
+}
+
+async function linked(db, kind, source) {
+  const { rows } = await db.query('SELECT body FROM ims_records WHERE kind = $1 AND body->>\'source\' = $2', [kind, source])
+  return rows.map((row) => row.body)
+}
+
+function remaining(original, posted) {
+  const quantities = new Map(original.map((line) => [line.item, fixed(line.quantity)]))
+  for (const record of posted) {
+    for (const line of record.lines) {
+      quantities.set(line.item, (quantities.get(line.item) ?? 0) - fixed(line.quantity))
+    }
+  }
+  return quantities
+}
+
+async function stock(db, through) {
+  const { rows } = await db.query(`
+    SELECT i.id, i.body->>'code' AS code, i.body->>'name' AS name, i.body->>'unit' AS unit,
+      (i.body->>'minimum')::numeric AS minimum,
+      coalesce(sum(l.quantity) FILTER (WHERE $1::text IS NULL OR movement.body->>'date' <= $1), 0) AS quantity
+    FROM ims_records i
+    LEFT JOIN ims_stock_ledger l ON l.item_id = i.id
+    LEFT JOIN ims_records movement ON movement.id = l.record_id
+    WHERE i.kind = 'items' GROUP BY i.id ORDER BY i.body->>'code'
+  `, [through ?? null])
+  return rows
+}
+
+async function prepareDocument(db, kind, body) {
+  switch (kind) {
+    case 'orders': {
+      const quote = await findRecord(db, 'quotations', body.source)
+      check((await linked(db, kind, body.source)).length === 0, 'A purchase order already exists for this quotation.', 409)
+      check(body.date >= quote.date, 'The order date cannot be before the quotation date.')
+      return { ...body, vendor: quote.vendor, project: quote.project, lines: quote.lines }
+    }
+    case 'receipts': {
+      const order = await findRecord(db, 'orders', body.source)
+      check(body.date >= order.date, 'The receipt date cannot be before the order date.')
+      const available = remaining(order.lines, await linked(db, kind, body.source))
+      const orderLines = new Map(order.lines.map((line) => [line.item, line]))
+      for (const line of body.lines) {
+        check(fixed(line.quantity) <= (available.get(line.item) ?? 0), 'Receipt quantity exceeds the remaining purchase order quantity.', 409)
+        line.price = orderLines.get(line.item).price
+      }
+      return { ...body, vendor: order.vendor }
+    }
+    case 'invoices': {
+      const receipt = await findRecord(db, 'receipts', body.source)
+      check((await linked(db, kind, body.source)).length === 0, 'An invoice already exists for this receipt.', 409)
+      check(body.date >= receipt.date, 'The invoice date cannot be before the receipt date.')
+      return { ...body, vendor: receipt.vendor, lines: receipt.lines }
+    }
+    case 'issues': {
+      const bom = await findRecord(db, 'boms', body.source)
+      const available = remaining(bom.lines, await linked(db, kind, body.source))
+      const balances = new Map((await stock(db)).map((item) => [item.id, fixed(item.quantity)]))
+      for (const line of body.lines) {
+        const quantity = fixed(line.quantity)
+        check(quantity <= (available.get(line.item) ?? 0), 'Issue quantity exceeds the remaining BOM requirement.', 409)
+        check(quantity <= (balances.get(line.item) ?? 0), 'There is insufficient stock for this issue.', 409)
+      }
+      return { ...body, project: bom.project }
+    }
+    case 'openings': {
+      const { rows } = await db.query('SELECT DISTINCT item_id FROM ims_stock_ledger WHERE item_id = ANY($1::bigint[])', [body.lines.map((line) => line.item)])
+      check(!rows.length, 'Opening stock must be the first movement for each item.', 409)
+      return body
+    }
+    case 'closings': {
+      const lines = (await stock(db, body.date)).map((item) => ({
+        item: item.id, code: item.code, name: item.name, unit: item.unit, quantity: item.quantity,
+      }))
+      return { ...body, lines }
+    }
+    default: return body
+  }
+}
+
+export async function saveInventory(pool, actor, kind, input) {
+  check(Object.hasOwn(sections, kind) && canWrite(actor.role, kind), 'You do not have permission for this action.', 403)
+  check(input && typeof input === 'object', 'Enter valid record data.')
+  const spec = sections[kind]
+  return transaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(3140322)')
+    const body = await readFields(db, kind, input)
+    const reference = body.code ?? body.number
+    if (input.id) {
+      check(['items', 'vendors', 'projects'].includes(kind), 'Posted documents cannot be edited.', 409)
+      const current = await findRecord(db, kind, input.id)
+      await db.query('UPDATE ims_records SET reference = $1, body = $2 WHERE id = $3', [reference, body, current.id])
+      await audit(db, actor.userId, 'Updated ' + spec.single, reference)
+      return { id: current.id }
+    }
+
+    if (spec.lines) body.lines = await readLines(db, input.lines, spec.prices)
+    if (['openings', 'issues', 'receipts', 'closings'].includes(kind)) {
+      const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format()
+      check(body.date <= today, 'Stock dates cannot be in the future.')
+      const dates = await db.query("SELECT max(body->>'date') AS date FROM ims_records WHERE kind = 'closings'")
+      const lastClose = dates.rows[0].date
+      check(!lastClose || body.date > lastClose, 'The date must be after the last stock close.', 409)
+      if (kind !== 'closings') {
+        if (kind === 'issues') {
+          const { rows } = await db.query(`
+            SELECT max(r.body->>'date') AS date FROM ims_stock_ledger l
+            JOIN ims_records r ON r.id = l.record_id WHERE l.item_id = ANY($1::bigint[])
+          `, [body.lines.map((line) => line.item)])
+          check(!rows[0].date || body.date >= rows[0].date, 'Stock issues cannot be backdated before an existing item movement.', 409)
+        }
+      }
+    }
+    const document = await prepareDocument(db, kind, body)
+    const { rows: [record] } = await db.query(`
+      INSERT INTO ims_records (kind, reference, body, created_by) VALUES ($1, $2, $3, $4) RETURNING id
+    `, [kind, reference, document, actor.userId])
+
+    if (['openings', 'receipts', 'issues'].includes(kind)) {
+      const direction = kind === 'issues' ? -1 : 1
+      for (const line of document.lines) {
+        await db.query('INSERT INTO ims_stock_ledger VALUES ($1, $2, $3)', [
+          record.id, line.item, (direction * line.quantity).toFixed(3),
+        ])
+      }
+    }
+    await audit(db, actor.userId, 'Created ' + spec.single, reference)
+    return record
+  })
+}
+
+export async function readInventory(pool, actor) {
+  const { rows, balances } = await transaction(pool, async (db) => {
+    await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+    const { rows } = await db.query('SELECT id, kind, body, created_at AS "createdAt" FROM ims_records ORDER BY id DESC')
+    return { rows, balances: await stock(db) }
+  })
+  const records = Object.fromEntries(Object.keys(sections).map((kind) => [kind, []]))
+  for (const { id, kind, body, createdAt } of rows) {
+    if (!canRead(actor.role, kind)) continue
+    const record = { ...body, id, createdAt, lineCount: body.lines?.length }
+    if (actor.role === 'store_person') {
+      record.lines = record.lines?.map(({ item, quantity }) => ({ item, quantity }))
+    } else if (body.lines?.some((line) => line.price !== undefined)) {
+      const cents = body.lines.reduce((sum, line) => (
+        sum + (BigInt(fixed(line.quantity)) * BigInt(fixed(line.price, 100)) + 500n) / 1000n
+      ), 0n)
+      record.total = (cents / 100n).toString() + '.' + (cents % 100n).toString().padStart(2, '0')
+    }
+    records[kind].push(record)
+  }
+  const orderReceipts = Map.groupBy(records.receipts, (receipt) => receipt.source)
+  const invoiced = new Set(records.invoices.map((invoice) => invoice.source))
+  for (const order of records.orders) {
+    const receipts = orderReceipts.get(order.id) ?? []
+    const complete = [...remaining(order.lines, receipts).values()].every((quantity) => quantity === 0)
+    order.status = complete ? 'Received' : receipts.length ? 'Part received' : 'Open'
+  }
+  for (const receipt of records.receipts) receipt.invoiced = invoiced.has(receipt.id)
+  const ordered = new Set(records.orders.map((order) => order.source))
+  for (const quote of records.quotations) quote.status = ordered.has(quote.id) ? 'Ordered' : 'Recorded'
+  return { records, balances }
+}
+
+export async function readAudit(pool) {
+  const { rows } = await pool.query(`
+    SELECT id, actor, action, reference, happened_at AS "date" FROM ims_audit ORDER BY id DESC LIMIT 200
+  `)
+  return rows
+}

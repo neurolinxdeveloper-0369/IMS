@@ -9,3 +9,7 @@
 !welcome.jsx
 !welcome.css
 !auth.mjs
+!inventory.mjs
+!inventory-shared.mjs
+!workspace.jsx
+!workspace.css

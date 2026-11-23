@@ -2,7 +2,7 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY index.html vite.config.mjs welcome.jsx welcome.css ./
+COPY index.html vite.config.mjs welcome.jsx welcome.css workspace.jsx workspace.css inventory-shared.mjs ./
 RUN npm run build
 
 FROM node:24-alpine AS auth
@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY auth.mjs ./
+COPY auth.mjs inventory.mjs inventory-shared.mjs ./
 USER node
 CMD ["node", "auth.mjs"]
 

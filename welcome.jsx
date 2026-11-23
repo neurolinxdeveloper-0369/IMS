@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Workspace } from './workspace.jsx'
 import './welcome.css'
 
 function WelcomePage() {
@@ -55,7 +56,9 @@ function WelcomePage() {
     }
   }
 
-  const roleLabel = { admin: 'Admin', manager: 'Manager', store_person: 'Store Person' }
+  if (session) {
+    return <Workspace session={session} onSession={setSession} logout={handleSignOut} logoutStatus={status} logoutPending={pending} />
+  }
 
   return (
     <>
@@ -69,14 +72,6 @@ function WelcomePage() {
         </header>
         <main id="main" tabIndex={-1}>
           <section className="hero" aria-labelledby="sign-in-title">
-            {session ? (
-              <div className="sign-in">
-                <h1 id="sign-in-title">Inventory Management System</h1>
-                <p>Signed in as {session.userId} · {roleLabel[session.role]}</p>
-                <button type="button" onClick={handleSignOut} disabled={pending}>Sign out</button>
-                <div className="sign-in-status" role="status">{status}</div>
-              </div>
-            ) : (
             <form className="sign-in" method="post" action="/IMS/api/login" onSubmit={handleSignIn}>
               <h1 id="sign-in-title">Account access</h1>
               <label htmlFor="user-id">User ID</label>
@@ -86,7 +81,6 @@ function WelcomePage() {
               <button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Sign in'}</button>
               <div className="sign-in-status" role="status">{status}</div>
             </form>
-            )}
             <figure className="hero-art" aria-hidden="true">
               <svg className="workspace-art" viewBox="0 0 660 660" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <defs>

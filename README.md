@@ -95,3 +95,11 @@ bash scripts/check-image.sh neurolinx-ims:local local
 ```
 
 Edit `welcome.jsx` and `welcome.css` for future page changes. The Docker build runs `npm ci` and `npm run build`.
+
+## Inventory workspace
+
+- Add items, vendors and projects first. A project BOM lists the required items and quantities. You can copy its lines into a vendor quotation.
+- Post a purchase order from a quotation, then post one or more goods receipts against that order. The GRN adds stock and the purchase invoice copies the received lines and agreed unit prices. Current invoice matching is one invoice per GRN.
+- Post opening stock before the first movement for an item. A project issue deducts stock and consumes the BOM requirement. Closing stock records an as-of snapshot and locks stock postings through that date.
+- Admins create Manager and Store Person accounts from Team accounts and can reset their passwords. A temporary password must be changed at first sign-in. Managers can maintain purchasing and inventory records. Store Persons can post GRNs and stock issues without access to quotations or invoices.
+- The overview, reorder indicators, stock export and activity log use recorded transactions. The workspace creates no sample records.
