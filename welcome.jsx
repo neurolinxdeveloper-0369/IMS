@@ -23,7 +23,7 @@ function WelcomePage() {
         <main id="main" tabIndex={-1}>
           <section className="hero" aria-labelledby="sign-in-title">
             <form className="sign-in" method="post" onSubmit={handleSignIn}>
-              <h1 id="sign-in-title">Sign in</h1>
+              <h1 id="sign-in-title">Account access</h1>
               <label htmlFor="user-id">User ID</label>
               <input id="user-id" name="username" autoComplete="username" required />
               <label htmlFor="password">Password</label>
