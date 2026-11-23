@@ -1,0 +1,7 @@
+services:
+  ims:
+    image: ${IMS_IMAGE:-ghcr.io/neurolinxdeveloper-0369/ims:latest}
+    container_name: neurolinx-ims
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${IMS_PORT:-3060}:80"

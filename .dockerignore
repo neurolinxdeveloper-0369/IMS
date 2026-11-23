@@ -1,0 +1,10 @@
+**
+!Dockerfile
+!.dockerignore
+!nginx.conf
+!index.html
+!package.json
+!package-lock.json
+!vite.config.mjs
+!welcome.jsx
+!welcome.css
