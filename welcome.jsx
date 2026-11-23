@@ -8,17 +8,16 @@ function WelcomePage() {
       <a className="skip-link" href="#main">Skip to content</a>
       <div className="page">
         <header className="masthead">
-          <div className="identity" aria-label="Neurolinx IMS">
+          <div className="identity" aria-label="Neurolinx Inventory Management System">
             <a className="wordmark" href="https://neurolinx.in" aria-label="Neurolinx home"><span className="brand-accent" aria-hidden="true"></span>Neurolinx</a>
-            <span className="identity-divider" aria-hidden="true"></span><span className="site-name">IMS</span>
+            <span className="identity-divider" aria-hidden="true"></span><span className="site-name">Inventory Management System</span>
           </div>
-          <a className="header-link" href="https://neurolinx.in" aria-label="Visit Neurolinx website">Visit Neurolinx<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c5 5 5 12 0 17-5-5-5-12 0-17Z"/></svg></a>
         </header>
         <main id="main" tabIndex={-1}>
           <section className="hero" aria-labelledby="welcome-title">
             <div className="hero-copy">
               <p className="eyebrow">A Neurolinx workspace</p>
-              <h1 id="welcome-title">Welcome<br />to <span>IMS.</span></h1>
+              <h1 id="welcome-title">Welcome to <span>Inventory Management System</span></h1>
               <p className="hero-intro">Your workspace starts here.</p>
               <a className="hero-action" href="#about">About this space<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="8"/><path d="M12 10.5v6M12 7.5v.1" strokeLinecap="round"/></svg></a>
               <div className="hero-caption" aria-hidden="true">A fresh perspective. A familiar place.</div>
@@ -34,7 +33,6 @@ function WelcomePage() {
                   <filter id="shadow" x="-.8" y="-.5" width="2.6" height="2.4"><feGaussianBlur stdDeviation="19"/></filter>
                 </defs>
                 <rect width="660" height="660" fill="url(#grid)" mask="url(#grid-mask)"/>
-                <text x="330" y="246" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="180" fontWeight="700" letterSpacing="-16" fill="#e8eae2">IMS</text>
                 <circle cx="330" cy="332" r="239" stroke="#dce0d5" strokeWidth="1"/>
                 <circle cx="330" cy="332" r="209" stroke="#e0e3d9" strokeDasharray="3 10"/>
                 <g className="orbit-detail"><path d="M569 330h9M82 330h9M330 82v9M330 569v9" stroke="#919a88" strokeWidth="2"/><rect x="492" y="162" width="9" height="9" rx="1" transform="rotate(45 492 162)" fill="#f6f4f0" stroke="#9ca592"/></g>
@@ -70,10 +68,10 @@ function WelcomePage() {
           </section>
           <section id="about" className="about" aria-labelledby="about-title">
             <p className="section-label">Welcome to your space</p>
-            <div className="about-copy"><h2 id="about-title">One place to begin.</h2><p>This is the welcome page for Neurolinx IMS.<br />A simple introduction to your workspace.</p></div>
+            <div className="about-copy"><h2 id="about-title">One place to begin.</h2><p>This is the welcome page for Neurolinx Inventory Management System.<br />A simple introduction to your workspace.</p></div>
           </section>
         </main>
-        <footer className="footer"><span><strong>Neurolinx IMS</strong><br />Welcome. Make yourself at home.</span><a href="https://neurolinx.in">neurolinx.in</a></footer>
+        <footer className="footer"><span><strong>Neurolinx Inventory Management System</strong><br />Welcome. Make yourself at home.</span></footer>
       </div>
     </>
   )
