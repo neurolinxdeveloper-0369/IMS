@@ -19,7 +19,7 @@ done
 [[ "$(curl --fail --silent --show-error --max-time 5 "$base/health")" = "ok" ]]
 for route in /IMS /IMS/ /IMS/index.html; do
   content=$(curl --fail --silent --show-error --max-time 5 "$base$route")
-  [[ "$content" == *'<title>Welcome to Inventory Management System | Neurolinx</title>'* ]] || {
+  [[ "$content" == *'<title>Inventory Management System | Neurolinx</title>'* ]] || {
     echo "The welcome page did not render at $route." >&2; exit 1;
   }
 done

@@ -1,8 +1,15 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import './welcome.css'
 
 function WelcomePage() {
+  const [status, setStatus] = useState('')
+
+  function handleSignIn(event) {
+    event.preventDefault()
+    setStatus('Sign-in is not available yet.')
+  }
+
   return (
     <>
       <a className="skip-link" href="#main">Skip to content</a>
@@ -14,14 +21,16 @@ function WelcomePage() {
           </div>
         </header>
         <main id="main" tabIndex={-1}>
-          <section className="hero" aria-labelledby="welcome-title">
-            <div className="hero-copy">
-              <p className="eyebrow">A Neurolinx workspace</p>
-              <h1 id="welcome-title">Welcome to <span>Inventory Management System</span></h1>
-              <p className="hero-intro">Your workspace starts here.</p>
-              <a className="hero-action" href="#about">About this space<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="8"/><path d="M12 10.5v6M12 7.5v.1" strokeLinecap="round"/></svg></a>
-              <div className="hero-caption" aria-hidden="true">A fresh perspective. A familiar place.</div>
-            </div>
+          <section className="hero" aria-labelledby="sign-in-title">
+            <form className="sign-in" method="post" onSubmit={handleSignIn}>
+              <h1 id="sign-in-title">Sign in</h1>
+              <label htmlFor="user-id">User ID</label>
+              <input id="user-id" name="username" autoComplete="username" required />
+              <label htmlFor="password">Password</label>
+              <input id="password" name="password" type="password" autoComplete="current-password" required />
+              <button type="submit">Sign in</button>
+              <div className="sign-in-status" role="status">{status}</div>
+            </form>
             <figure className="hero-art" aria-hidden="true">
               <svg className="workspace-art" viewBox="0 0 660 660" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <defs>
@@ -63,15 +72,10 @@ function WelcomePage() {
                 <path d="M139 251h23M150.5 239.5v23M507 479h16M515 471v16" stroke="#a0aa94"/>
                 <path d="M508 270h27v16M128 456h-23v-17" stroke="#c0c8b7"/>
               </svg>
-              <figcaption className="art-note">Space to begin</figcaption>
             </figure>
           </section>
-          <section id="about" className="about" aria-labelledby="about-title">
-            <p className="section-label">Welcome to your space</p>
-            <div className="about-copy"><h2 id="about-title">One place to begin.</h2><p>This is the welcome page for Neurolinx Inventory Management System.<br />A simple introduction to your workspace.</p></div>
-          </section>
         </main>
-        <footer className="footer"><span><strong>Neurolinx Inventory Management System</strong><br />Welcome. Make yourself at home.</span></footer>
+        <footer className="footer">Neurolinx Inventory Management System</footer>
       </div>
     </>
   )
