@@ -12,7 +12,7 @@ React renders the welcome page. Vite builds self-contained assets under `/IMS/` 
 | `index.html`, `welcome.jsx`, `welcome.css` | HTML entry point, React page and styles |
 | `Dockerfile` | Standalone Nginx image and build-commit metadata |
 | `nginx.conf` | Container routes for IMS, health and version |
-| `docker-compose.yml` | Separate image-only Portainer stack |
+| `docker-compose.yml` | Git-backed Portainer stack that builds the image locally |
 | `.env.example` | Image name and host-port configuration |
 | `.github/workflows/ci-cd.yml` | PR checks, image publication and optional deployment |
 | `scripts/check-image.sh` | Container integration checks run by CI |
@@ -43,11 +43,10 @@ For the example repository, the image is `ghcr.io/neurolinxdeveloper-0369/ims:la
 
 ## 2. First Portainer deployment
 
-1. Wait for the first image publication to finish in GitHub Actions.
-2. Create a **new Portainer stack named `ims`**. Use this repository's `docker-compose.yml`, or paste that file into the stack editor.
-3. Set stack variables `IMS_IMAGE` to your published image and `IMS_PORT` to an available host port. The configurable default is `3060`; availability has not been checked on the server.
-4. GHCR packages may be private. Configure registry authentication in Portainer for image pulls, or deliberately set the image package's visibility to public if that is your choice. Repository visibility alone does not establish package visibility. Keep credentials out of Git and Compose files.
-5. Deploy the stack and wait for `neurolinx-ims` to become healthy.
+1. Create a **new Portainer stack named `ims`** using the Repository build method, this repository's HTTPS Git URL, `refs/heads/main`, and the Compose path `docker-compose.yml`.
+2. Enable GitOps updates using Polling. Portainer builds the image from its Git checkout when the tracked branch changes.
+3. Use the default loopback port `3060`, or set `IMS_PORT` to another available host port.
+4. Deploy the stack and wait for `neurolinx-ims` to become healthy.
 
 The stack binds only `127.0.0.1:<IMS_PORT>`. CloudPanel on the same server provides public HTTPS. IMS has its own image and container, with no dependency on the company website or Neuro Series containers.
 
@@ -65,7 +64,7 @@ For direct static hosting with the two existing `try_files` locations, run `npm 
 Verify:
 
 - `https://neurolinx.in/IMS` and `https://neurolinx.in/IMS/` show the welcome page.
-- `https://neurolinx.in/IMS/version.json` returns `service: neurolinx-ims` and your published commit.
+- `https://neurolinx.in/IMS/version.json` returns `service: neurolinx-ims`. The Portainer source build uses the `local` build marker. Check the Git commit shown in Portainer to identify the deployed revision.
 - `/health` is the container's health endpoint; arbitrary application paths return 404.
 
 ## 4. Optional automatic Portainer deployment
