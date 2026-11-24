@@ -48,6 +48,16 @@ export function canRead(role, section) {
   return role !== 'store_person' || !['quotations', 'invoices'].includes(section)
 }
 
+export function projectCatalogItems(items, boms, projectId) {
+  if (!projectId) return items
+  const itemIds = new Set()
+  for (const bom of boms) {
+    if (String(bom.project) !== String(projectId)) continue
+    for (const line of bom.lines) itemIds.add(String(line.item))
+  }
+  return items.filter((item) => itemIds.has(String(item.id)))
+}
+
 export function wholeProductionUnits(value) {
   return /^\d{1,9}$/.test(value) && Number(value) > 0 ? BigInt(value) : null
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
+import { canRead, canWrite, planBomLine, projectCatalogItems, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
 import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, excelRequiredAmount, excelStockQuantity, joinBomPlanningRows, parseBomWorkbookSheet, requiredBomAmount } from './bom-workbook.mjs'
 import './workspace.css'
 
@@ -286,6 +286,7 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
   const [lines, setLines] = useState([{ ...emptyLine }])
   const [source, setSource] = useState('')
   const [project, setProject] = useState('')
+  const [openingProject, setOpeningProject] = useState('')
   const [workbook, setWorkbook] = useState(null)
   const [reading, setReading] = useState(false)
   const preview = workbook?.sheets?.length
@@ -296,7 +297,8 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
   const sourceRow = data.records[sourceKind]?.find((record) => record.id === source)
   const items = sourceRow?.lines
     ? data.records.items.filter((item) => sourceRow.lines.some((line) => line.item === item.id))
-    : data.records.items
+    : projectCatalogItems(data.records.items, data.records.boms, openingProject)
+  const openingItemIds = openingProject ? new Set(items.map((item) => item.id)) : null
   function updateLine(index, field, value) {
     setLines(lines.map((line, current) => current === index ? { ...line, [field]: value } : line))
   }
@@ -399,12 +401,24 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
       {spec.lines && !workbook && (
         <fieldset className="ims-lines">
           <legend>Items</legend>
-          {!items.length && <p className="ims-empty">Add an item to the catalog before posting this record.</p>}
+          {page === 'openings' && <label className="ims-field ims-search">
+            <span>Filter items by project</span>
+            <select value={openingProject} onChange={(event) => setOpeningProject(event.target.value)}>
+              <option value="">All projects</option>
+              {data.records.projects.map((entry) => <option key={entry.id} value={entry.id}>{labelFor(entry)}</option>)}
+            </select>
+          </label>}
+          {!items.length && <p className="ims-empty">{openingProject
+            ? 'This project has no items in its BOMs.'
+            : 'Add an item to the catalog before posting this record.'}</p>}
           {lines.map((line, index) => (
             <div className="ims-line" key={index}>
               <label className="ims-field"><span>Item</span>
                 <select value={line.item} onChange={(event) => updateLine(index, 'item', event.target.value)} required>
                   <option value="">Select an item</option>
+                  {line.item && openingItemIds && !openingItemIds.has(line.item) && (
+                    <option value={line.item}>{labelFor(data.records.items.find((item) => item.id === line.item))} (outside project filter)</option>
+                  )}
                   {items.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
                 </select>
               </label>
