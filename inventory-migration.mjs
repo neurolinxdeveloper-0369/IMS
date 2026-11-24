@@ -215,3 +215,20 @@ export async function migrateInventoryReads(db) {
     INSERT INTO ims_schema_migrations (version) VALUES (2);
   `)
 }
+
+export async function migrateBomSourceRows(db) {
+  if ((await db.query('SELECT 1 FROM ims_schema_migrations WHERE version = 3')).rowCount) return
+  await db.query(`
+    CREATE TABLE ims_bom_source_rows (
+      bom_id bigint NOT NULL REFERENCES ims_boms(id) ON DELETE CASCADE,
+      row_number integer NOT NULL CHECK (row_number > 0),
+      item_id bigint REFERENCES ims_items(id),
+      quantity numeric(18,3) NOT NULL CHECK (quantity >= 0),
+      unit_price numeric(18,2) CHECK (unit_price >= 0),
+      fields jsonb NOT NULL CHECK (jsonb_typeof(fields) = 'object'),
+      PRIMARY KEY (bom_id, row_number),
+      CHECK ((quantity > 0) = (item_id IS NOT NULL))
+    );
+    INSERT INTO ims_schema_migrations (version) VALUES (3);
+  `)
+}

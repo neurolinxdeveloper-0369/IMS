@@ -3,7 +3,7 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import pg from 'pg'
 import { roles } from './inventory-shared.mjs'
-import { audit, initInventory, readAudit, readInventory, RequestError, saveInventory, transaction } from './inventory.mjs'
+import { audit, importBom, initInventory, readAudit, readInventory, RequestError, saveInventory, transaction } from './inventory.mjs'
 
 const pool = new pg.Pool({ connectionTimeoutMillis: 3000 })
 const deriveKey = promisify(scrypt)
@@ -66,13 +66,15 @@ function json(response, code, data, cookie) {
 }
 
 async function readBody(request, maxLength = 2048) {
-  let body = ''
+  const chunks = []
+  let length = 0
   for await (const chunk of request) {
-    body += chunk
-    if (body.length > maxLength) throw new RequestError(413, 'The request is too large.')
+    length += chunk.length
+    if (length > maxLength) throw new RequestError(413, 'The request is too large.')
+    chunks.push(chunk)
   }
   try {
-    return JSON.parse(body) ?? {}
+    return JSON.parse(Buffer.concat(chunks, length).toString('utf8')) ?? {}
   } catch {
     return {}
   }
@@ -220,6 +222,9 @@ async function route(request, response) {
   }
   if (user.mustChangePassword) throw new RequestError(403, 'Change your temporary password to continue.')
   if (method === 'GET' && url === '/IMS/api/inventory') return json(response, 200, await readInventory(pool, user))
+  if (method === 'POST' && url === '/IMS/api/inventory/boms/import') {
+    return json(response, 200, await importBom(pool, user, await readBody(request, 768 * 1024)))
+  }
   const record = /^\/IMS\/api\/inventory\/([a-z]+)$/.exec(url)
   if (method === 'POST' && record) {
     return json(response, 200, await saveInventory(pool, user, record[1], await readBody(request, 64 * 1024)))

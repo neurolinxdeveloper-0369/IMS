@@ -1,5 +1,6 @@
+import { createHash } from 'node:crypto'
 import { sections, canRead, canWrite } from './inventory-shared.mjs'
-import { migrateInventory, migrateInventoryReads } from './inventory-migration.mjs'
+import { migrateBomSourceRows, migrateInventory, migrateInventoryReads } from './inventory-migration.mjs'
 
 export async function initInventory(pool) {
   await transaction(pool, async (db) => {
@@ -30,6 +31,7 @@ export async function initInventory(pool) {
     `)
     await migrateInventory(db)
     await migrateInventoryReads(db)
+    await migrateBomSourceRows(db)
   })
 }
 
@@ -120,6 +122,87 @@ async function readLines(db, input, prices) {
     lines.push(line)
   }
   return lines
+}
+
+const bomImportFields = ['sku', 'name', 'category', 'designators', 'manufacturer', 'part', 'technicalData', 'serial']
+
+function parseBomSourceRow(input, rowNumber) {
+  const label = 'BOM row ' + rowNumber
+  check(input && typeof input === 'object' && !Array.isArray(input), label + ' is invalid.')
+  const fields = {}
+  for (const key of bomImportFields) {
+    const raw = input[key]
+    if (raw === undefined || raw === null || raw === '') continue
+    check(typeof raw === 'string' || (typeof raw === 'number' && Number.isFinite(raw)), label + ' has an invalid ' + key + '.')
+    const value = String(raw).trim()
+    check(value.length <= 240 && !value.includes('\0'), label + ' has an invalid ' + key + '.')
+    if (value) fields[key] = value
+  }
+  const quantity = numeric(input.quantity, label + ' quantity', 3, true)
+  const unitPrice = input.unitPrice === undefined || input.unitPrice === null || input.unitPrice === ''
+    ? null : numeric(input.unitPrice, label + ' unit price', 2, true)
+  if (quantity > 0) {
+    check(fields.sku || fields.part, label + ' needs a SKU or a Part No. / Value.')
+    if (!fields.sku) {
+      const identity = ['manufacturer', 'part', 'technicalData'].map((key) =>
+        (fields[key] ?? '').normalize('NFKC').toUpperCase().replace(/\s+/g, ' '),
+      )
+      fields.sku = 'PCB-' + createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 16).toUpperCase()
+    }
+  }
+  return { fields, quantity, unitPrice }
+}
+
+async function insertInventoryRecord(db, actor, kind, body) {
+  const { rows: [record] } = await db.query(`
+    INSERT INTO ims_records (kind, reference, body, created_by) VALUES ($1, $2, $3, $4) RETURNING id
+  `, [kind, body.code ?? body.number, body, actor.userId])
+  return record
+}
+
+export async function importBom(pool, actor, input) {
+  check(canWrite(actor.role, 'boms'), 'You do not have permission for this action.', 403)
+  check(Array.isArray(input?.rows) && input.rows.length > 0 && input.rows.length <= 100, 'Import between 1 and 100 BOM rows.')
+  const rows = input.rows.map((row, index) => parseBomSourceRow(row, index + 1))
+  check(rows.some((row) => row.quantity > 0), 'Add at least one BOM row with a positive quantity.')
+
+  return transaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(3140322)')
+    const body = await readFields(db, 'boms', input)
+    const totals = new Map()
+    const items = new Map()
+    let itemsCreated = 0
+    for (const row of rows) {
+      if (row.quantity === 0) continue
+      const { fields } = row
+      if (!items.has(fields.sku)) {
+        const { rows: [existing] } = await db.query('SELECT id::text FROM ims_items WHERE reference = $1', [fields.sku])
+        if (existing) items.set(fields.sku, existing.id)
+        else {
+          const item = await insertInventoryRecord(db, actor, 'items', {
+            code: fields.sku, name: fields.name ?? fields.technicalData ?? fields.part ?? fields.sku, unit: 'ea', minimum: 0,
+          })
+          items.set(fields.sku, String(item.id))
+          await audit(db, actor.userId, 'Created item', fields.sku)
+          itemsCreated += 1
+        }
+      }
+      row.item = items.get(fields.sku)
+      const total = (totals.get(row.item) ?? 0) + fixed(row.quantity)
+      check(total <= 999999999999, 'The combined quantity for ' + fields.sku + ' is too large.')
+      totals.set(row.item, total)
+    }
+    body.lines = Array.from(totals, ([item, quantity]) => ({ item, quantity: quantity / 1000 }))
+    const { id } = await insertInventoryRecord(db, actor, 'boms', body)
+    for (const [index, row] of rows.entries()) {
+      await db.query(`
+        INSERT INTO ims_bom_source_rows (bom_id, row_number, item_id, quantity, unit_price, fields)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `, [id, index + 1, row.item ?? null, row.quantity, row.unitPrice, row.fields])
+    }
+    await audit(db, actor.userId, 'Imported BOM', body.number)
+    return { id, lineCount: body.lines.length, itemsCreated }
+  })
 }
 
 async function linked(db, kind, source) {
@@ -241,9 +324,7 @@ export async function saveInventory(pool, actor, kind, input) {
       }
     }
     const document = await prepareDocument(db, kind, body)
-    const { rows: [record] } = await db.query(`
-      INSERT INTO ims_records (kind, reference, body, created_by) VALUES ($1, $2, $3, $4) RETURNING id
-    `, [kind, reference, document, actor.userId])
+    const record = await insertInventoryRecord(db, actor, kind, document)
 
     if (['openings', 'receipts', 'issues'].includes(kind)) {
       const direction = kind === 'issues' ? -1 : 1
@@ -259,15 +340,26 @@ export async function saveInventory(pool, actor, kind, input) {
 }
 
 export async function readInventory(pool, actor) {
-  const { rows, balances } = await transaction(pool, async (db) => {
+  const { rows, balances, imported } = await transaction(pool, async (db) => {
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
     const { rows } = await db.query('SELECT id::text, kind, body, created_at AS "createdAt" FROM ims_inventory_read ORDER BY ims_inventory_read.id DESC')
-    return { rows, balances: await stock(db) }
+    const imported = await db.query(`
+      SELECT bom_id::text AS bom, item_id::text AS item, quantity::float8 AS quantity, unit_price::float8 AS "unitPrice", fields
+      FROM ims_bom_source_rows ORDER BY bom_id, row_number
+    `)
+    return { rows, balances: await stock(db), imported: Map.groupBy(imported.rows, (row) => row.bom) }
   })
   const records = Object.fromEntries(Object.keys(sections).map((kind) => [kind, []]))
   for (const { id, kind, body, createdAt } of rows) {
     if (!canRead(actor.role, kind)) continue
     const record = { ...body, id, createdAt, lineCount: body.lines?.length }
+    if (kind === 'boms' && imported.has(id)) {
+      record.sourceRows = imported.get(id).map(({ item, quantity, unitPrice, fields }) => ({
+        ...fields, quantity,
+        ...(item === null ? {} : { item }),
+        ...(unitPrice === null || actor.role === 'store_person' ? {} : { unitPrice }),
+      }))
+    }
     if (actor.role === 'store_person') {
       record.lines = record.lines?.map(({ item, quantity }) => ({ item, quantity }))
     } else if (body.lines?.some((line) => line.price !== undefined)) {

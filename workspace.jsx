@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
+import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, parseBomWorkbookSheet } from './bom-workbook.mjs'
 import './workspace.css'
 
 const groups = {
@@ -147,6 +148,17 @@ function BomStockPlan({ lines, balances }) {
   )
 }
 
+function BomWorkbookTable({ rows, showPrice = true, showSku = false }) {
+  const columns = bomWorkbookColumns.filter(([key]) => showPrice || key !== 'unitPrice')
+  if (showSku) columns.push(bomSkuColumn)
+  return <Table rows={rows} columns={columns}
+    renderCell={(key, row) => {
+      const value = row[key]
+      if (value === '' || value == null) return '—'
+      return key === 'unitPrice' && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : value
+    }} />
+}
+
 function Field({ field, data, value, onChange }) {
   const [name, label, type = 'text', optional] = field
   let options = data?.records[type]
@@ -175,6 +187,11 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
   const [lines, setLines] = useState([{ ...emptyLine }])
   const [source, setSource] = useState('')
   const [project, setProject] = useState('')
+  const [workbook, setWorkbook] = useState(null)
+  const [reading, setReading] = useState(false)
+  const preview = workbook?.sheets?.length
+    ? parseBomWorkbookSheet(workbook.sheets[workbook.selected].data)
+    : null
   const bomOptions = data.records.boms.filter((bom) => !project || bom.project === project)
   const sourceKind = spec.fields.find(([name]) => name === 'source')?.[2]
   const sourceRow = data.records[sourceKind]?.find((record) => record.id === source)
@@ -185,10 +202,40 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
     setLines(lines.map((line, current) => current === index ? { ...line, [field]: value } : line))
   }
 
+  async function loadWorkbook(event) {
+    const input = event.currentTarget
+    const file = input.files?.[0]
+    input.value = ''
+    if (!file) return
+    setWorkbook({ name: file.name })
+    if (!/\.xlsx$/i.test(file.name) || file.size > 5 * 1024 * 1024) {
+      setWorkbook({ name: file.name, error: 'Choose an Excel .xlsx file up to 5 MB.' })
+      return
+    }
+    setReading(true)
+    try {
+      const { default: readExcelFile } = await import('read-excel-file/browser')
+      const sheets = await readExcelFile(file, { parseNumber: (value) => value })
+      const firstBom = sheets.findIndex((sheet) => bomHeaderIndex(sheet.data) >= 0)
+      setWorkbook(sheets.length
+        ? { name: file.name, sheets, selected: Math.max(0, firstBom) }
+        : { name: file.name, error: 'This workbook has no worksheets.' })
+    } catch {
+      setWorkbook({ name: file.name, error: 'This workbook could not be read. Open it in Excel and save a copy as .xlsx.' })
+    } finally {
+      setReading(false)
+    }
+  }
+
   return (
     <form className="ims-panel ims-form" onSubmit={(event) => {
       event.preventDefault()
-      onSave({ ...Object.fromEntries(new FormData(event.currentTarget)), ...(spec.lines ? { lines } : {}), id: initial?.id })
+      const fields = Object.fromEntries(new FormData(event.currentTarget))
+      if (workbook) {
+        if (!reading && preview && !preview.errors.length) onSave({ ...fields, rows: preview.rows })
+        return
+      }
+      onSave({ ...fields, ...(spec.lines ? { lines } : {}), id: initial?.id })
     }}>
       <h2>{initial ? 'Edit ' : 'New '}{spec.single}</h2>
       <div className="ims-form-grid">
@@ -201,6 +248,42 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
           return <Field key={name} field={field} data={data} value={name === 'source' ? source : page === 'quotations' && name === 'project' ? project : initial?.[name]} onChange={handler} />
         })}
       </div>
+      {page === 'boms' && (
+        <section className="ims-bom-upload" aria-label="Excel BOM import">
+          <div className="ims-actions">
+            <label className="ims-field"><span>Upload BOM Excel</span>
+              <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={loadWorkbook} disabled={reading || busy} />
+            </label>
+            {workbook && <button type="button" className="ims-button ims-secondary" onClick={() => setWorkbook(null)}
+              disabled={reading || busy}>Use manual entry</button>}
+          </div>
+          {reading && <p role="status">Reading the workbook…</p>}
+          {workbook?.error && <p className="ims-error" role="alert">{workbook.error}</p>}
+          {preview && (
+            <>
+              <div className="ims-panel-title">
+                <h3>Preview {workbook.name}</h3>
+                {workbook.sheets.length > 1 && <label className="ims-field"><span>Worksheet</span>
+                  <select value={workbook.selected} disabled={busy}
+                    onChange={(event) => setWorkbook({ ...workbook, selected: Number(event.target.value) })}>
+                    {workbook.sheets.map((sheet, index) => <option key={sheet.sheet} value={index}>{sheet.sheet}</option>)}
+                  </select>
+                </label>}
+              </div>
+              {preview.errors.length > 0 && <div className="ims-error" role="alert">
+                <strong>Fix these Excel entries and upload again</strong>
+                <ul>{preview.errors.slice(0, 12).map((error) => <li key={error}>{error}</li>)}</ul>
+                {preview.errors.length > 12 && <p>{preview.errors.length - 12} more issues found.</p>}
+              </div>}
+              {preview.rows.length > 0 && <>
+                <p>Posting reuses matching SKUs and creates missing items. Add an optional SKU column to match already cataloged parts. Zero-quantity rows are kept for reference.</p>
+                <BomWorkbookTable rows={preview.rows.slice(0, 100)} showSku={preview.rows.some((row) => row.sku)} />
+              </>}
+            </>
+          )}
+        </section>
+      )}
       {page === 'quotations' && bomOptions.length > 0 && (
         <label className="ims-field ims-form-import"><span>Copy items from a BOM <small>optional</small></span>
           <select value="" onChange={(event) => {
@@ -214,7 +297,7 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
           </select>
         </label>
       )}
-      {spec.lines && (
+      {spec.lines && !workbook && (
         <fieldset className="ims-lines">
           <legend>Items</legend>
           {!items.length && <p className="ims-empty">Add an item to the catalog before posting this record.</p>}
@@ -238,7 +321,9 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
       )}
       {page === 'closings' && <p>Record the stock balance as of this date and prevent further stock movements in the closed period.</p>}
       <div className="ims-actions">
-        <button className="ims-button" disabled={busy}>{editable.includes(page) ? 'Save record' : 'Post document'}</button>
+        <button className="ims-button" disabled={busy || (workbook && (reading || !preview || preview.errors.length > 0))}>
+          {workbook ? 'Import and post BOM' : editable.includes(page) ? 'Save record' : 'Post document'}
+        </button>
         <button type="button" className="ims-button ims-secondary" onClick={cancel}>Cancel</button>
       </div>
     </form>
@@ -443,7 +528,8 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
           {data && (spec || page === 'stock') && (
             <>
               {form && <RecordForm key={form.id ?? 'new'} page={page} data={data} initial={form.id ? form : null}
-                onSave={(body) => run(() => api('inventory/' + page, body), 'Record saved.')} cancel={() => setForm(null)} busy={busy} />}
+                onSave={(body) => run(() => api(page === 'boms' && body.rows ? 'inventory/boms/import' : 'inventory/' + page, body),
+                  body.rows ? 'BOM imported and posted.' : 'Record saved.')} cancel={() => setForm(null)} busy={busy} />}
               {detail && <section className="ims-panel ims-form">
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetail(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
@@ -454,6 +540,11 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                     columns={ [['item', 'Item'], ['quantity', 'Quantity'], ...(detail.lines.some((line) => line.price !== undefined) ? [['price', 'Unit price (INR)']] : [])] }
                     renderCell={(key, row) => key === 'item' ? (row.code ? row.code + ' · ' + row.name : labelFor(data.records.items.find((item) => item.id === row.item))) : row[key]} />
                 ))}
+                {page === 'boms' && detail.sourceRows?.length > 0 && <section className="ims-bom-upload">
+                  <h3>Workbook rows</h3>
+                  <BomWorkbookTable rows={detail.sourceRows.map((row, index) => ({ ...row, id: index }))}
+                    showPrice={session.role !== 'store_person'} showSku />
+                </section>}
               </section>}
               <section className="ims-panel">
                 <label className="ims-field ims-search"><span>Search {title.toLowerCase()}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>

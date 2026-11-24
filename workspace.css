@@ -75,6 +75,11 @@
 .ims-bom-plan-status { font-weight: 650; margin: .65rem 0; }
 .ims-table-wrap .ims-bom-shortage td { background: #fff0db; }
 .ims-table-wrap .ims-bom-shortage td:nth-last-child(-n+2) { color: #804213; font-weight: 700; }
+.ims-bom-upload { margin: .85rem 0; padding: .85rem; border: 1px solid var(--ims-border); border-radius: .5rem; }
+.ims-bom-upload .ims-field { margin-bottom: 0; }
+.ims-bom-upload h3 { margin: .55rem 0; font-size: 1rem; overflow-wrap: anywhere; }
+.ims-bom-upload p { color: var(--ims-muted); }
+.ims-bom-upload .ims-table-wrap td { white-space: normal; min-width: 5rem; overflow-wrap: anywhere; }
 .ims-empty { color: var(--ims-muted); margin: .8rem 0; }
 .ims-low { color: #91382a; font-weight: 650; }
 .ims-form { margin-bottom: 1rem; }

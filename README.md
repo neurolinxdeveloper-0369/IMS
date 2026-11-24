@@ -103,6 +103,7 @@ Edit `welcome.jsx` and `welcome.css` for future page changes. The Docker build r
 - Post opening stock before the first movement for an item. A project issue deducts stock and consumes the BOM requirement. Closing stock records an as-of snapshot and locks stock postings through that date.
 - Admins create Manager and Store Person accounts from Team accounts and can reset their passwords. A temporary password must be changed at first sign-in. Managers can maintain purchasing and inventory records. Store Persons can post GRNs and stock issues without access to quotations or invoices.
 - The overview, reorder indicators, stock export and activity log use recorded transactions. The workspace creates no sample records.
+- To import a PCB parts list, open **Bills of materials → New BOM**, set the project and BOM reference, and select **Upload BOM Excel**. Review the worksheet preview before selecting **Import and post BOM**. Keep part numbers with leading zeros in Excel text cells. An optional SKU column links rows to existing catalog items. Qty / Card must be present, and zero-quantity rows are retained for reference without contributing to stock requirements.
 
 ## Linked inventory tables
 
