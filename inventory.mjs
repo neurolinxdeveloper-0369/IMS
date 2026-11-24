@@ -1,7 +1,9 @@
 import { sections, canRead, canWrite } from './inventory-shared.mjs'
+import { migrateInventory } from './inventory-migration.mjs'
 
 export async function initInventory(pool) {
-  await pool.query(`
+  await transaction(pool, async (db) => {
+    await db.query(`
     CREATE TABLE IF NOT EXISTS ims_records (
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       kind text NOT NULL,
@@ -25,7 +27,9 @@ export async function initInventory(pool) {
       reference text NOT NULL,
       happened_at timestamptz NOT NULL DEFAULT now()
     );
-  `)
+    `)
+    await migrateInventory(db)
+  })
 }
 
 export class RequestError extends Error {
@@ -133,15 +137,21 @@ function remaining(original, posted) {
 }
 
 async function stock(db, through) {
+  if (!through) {
+    const { rows } = await db.query(`
+      SELECT item_id AS id, sku AS code, name, unit, reorder_level AS minimum, quantity
+      FROM ims_stock_on_hand ORDER BY sku
+    `)
+    return rows
+  }
   const { rows } = await db.query(`
-    SELECT i.id, i.body->>'code' AS code, i.body->>'name' AS name, i.body->>'unit' AS unit,
-      (i.body->>'minimum')::numeric AS minimum,
-      coalesce(sum(l.quantity) FILTER (WHERE $1::text IS NULL OR movement.body->>'date' <= $1), 0) AS quantity
-    FROM ims_records i
+    SELECT i.id, i.reference AS code, i.name, i.unit, i.reorder_level AS minimum,
+      coalesce(sum(l.quantity) FILTER (WHERE movement.document_date <= $1::date), 0) AS quantity
+    FROM ims_items i
     LEFT JOIN ims_stock_ledger l ON l.item_id = i.id
-    LEFT JOIN ims_records movement ON movement.id = l.record_id
-    WHERE i.kind = 'items' GROUP BY i.id ORDER BY i.body->>'code'
-  `, [through ?? null])
+    LEFT JOIN ims_stock_documents movement ON movement.id = l.record_id
+    GROUP BY i.id ORDER BY i.reference
+  `, [through])
   return rows
 }
 

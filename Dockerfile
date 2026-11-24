@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
-COPY auth.mjs inventory.mjs inventory-shared.mjs ./
+COPY auth.mjs inventory.mjs inventory-shared.mjs inventory-migration.mjs ./
 USER node
 CMD ["node", "auth.mjs"]
 

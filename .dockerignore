@@ -10,6 +10,7 @@
 !welcome.css
 !auth.mjs
 !inventory.mjs
+!inventory-migration.mjs
 !inventory-shared.mjs
 !workspace.jsx
 !workspace.css

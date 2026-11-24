@@ -103,3 +103,7 @@ Edit `welcome.jsx` and `welcome.css` for future page changes. The Docker build r
 - Post opening stock before the first movement for an item. A project issue deducts stock and consumes the BOM requirement. Closing stock records an as-of snapshot and locks stock postings through that date.
 - Admins create Manager and Store Person accounts from Team accounts and can reset their passwords. A temporary password must be changed at first sign-in. Managers can maintain purchasing and inventory records. Store Persons can post GRNs and stock issues without access to quotations or invoices.
 - The overview, reorder indicators, stock export and activity log use recorded transactions. The workspace creates no sample records.
+
+## Linked inventory tables
+
+On startup the authentication service applies the versioned inventory migration in one PostgreSQL transaction. It keeps the original `ims_records` rows and IDs, backfills separate tables and line tables with foreign keys, and records completion in `ims_schema_migrations`. Application writes go through the existing record path and update the linked tables in the same transaction. Use the linked tables for queries and reports, and use IMS screens to create or edit records. Stock on hand is available through `ims_stock_on_hand`, calculated from the existing movement ledger.
