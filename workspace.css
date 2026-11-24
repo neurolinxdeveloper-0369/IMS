@@ -85,15 +85,21 @@
   --ims-first-column: 3.75rem;
   --ims-second-column: clamp(7rem, 9vw, 10rem);
 }
-.ims-bom-plan .ims-table-wrap { isolation: isolate; }
+.ims-bom-plan .ims-table-wrap {
+  isolation: isolate;
+  max-height: min(65svh, 48rem);
+  overflow: auto;
+}
+.ims-bom-plan .ims-table-wrap:focus-visible { outline: 3px solid #c44737; outline-offset: -3px; }
+.ims-bom-plan .ims-table-wrap table { border-collapse: separate; border-spacing: 0; }
 .ims-bom-plan .ims-table-wrap :is(th, td) {
   white-space: normal;
   overflow-wrap: anywhere;
 }
 .ims-bom-plan .ims-table-wrap :is(th, td):not(.ims-table-group-heading):nth-child(-n+2) {
   position: sticky;
-  z-index: 1;
 }
+.ims-bom-plan .ims-table-wrap tbody td:nth-child(-n+2) { z-index: 1; }
 .ims-bom-plan .ims-table-wrap :is(th, td):not(.ims-table-group-heading):first-child {
   left: 0;
   width: var(--ims-first-column);
@@ -106,6 +112,12 @@
   max-width: var(--ims-second-column);
   box-shadow: 1px 0 var(--ims-border);
 }
+.ims-bom-plan .ims-table-wrap thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.ims-bom-plan .ims-table-wrap thead th:nth-child(-n+2) { z-index: 3; }
 .ims-bom-plan tbody tr:not(.ims-bom-shortage) td:nth-child(-n+2) { background: var(--ims-surface); }
 .ims-bom-plan .ims-table-wrap .ims-table-group-heading {
   background: #e6ebe3;

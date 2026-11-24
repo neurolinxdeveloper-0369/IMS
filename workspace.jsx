@@ -74,7 +74,7 @@ function formatCell(key, value, row, data, page) {
   return value ?? '—'
 }
 
-function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, empty = 'No records yet.' }) {
+function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, scrollLabel, empty = 'No records yet.' }) {
   if (!rows.length) return <p className="ims-empty">{empty}</p>
   const rowGroups = new Map()
   for (const row of rows) {
@@ -83,7 +83,8 @@ function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassNam
     rowGroups.get(group).push(row)
   }
   return (
-    <div className="ims-table-wrap">
+    <div className="ims-table-wrap" tabIndex={scrollLabel ? 0 : undefined}
+      role={scrollLabel ? 'region' : undefined} aria-label={scrollLabel}>
       <table>
         <thead><tr>{columns.map(([key, label]) => <th key={key} scope="col">{label}</th>)}{action && <th scope="col">Actions</th>}</tr></thead>
         {[...rowGroups].map(([group, members]) => (
@@ -164,7 +165,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
         {!valid ? 'Enter positive whole numbers for both quantities.'
           : shortCount ? `${shortCount} of ${lines.length} items short for this run.` : 'No shortages in known stock.'}
       </p>
-      <Table rows={rows} columns={columns} rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
+      <Table rows={rows} columns={columns} scrollLabel="BOM details table" rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
         groupBy={hasCategories ? (row) => row.category?.toUpperCase() || 'UNCATEGORIZED' : undefined}
         renderCell={(key, row) => {
           if (key.startsWith('source-')) {
