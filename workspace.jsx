@@ -146,6 +146,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
       sku: item?.code ?? sourceRows[0]?.sku ?? '—',
       name: item?.name ?? '—',
       quantity,
+      zeroQuantity: quantity === 0,
       ...plan,
       requiredAmount: showPrice ? requiredBomAmount(plan.shortage, sourceRows) : null,
     }
@@ -192,7 +193,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
             if (key === 'requiredAmount') return excelRequiredAmount(value)
             return typeof value === 'bigint' ? excelStockQuantity(value) : value === '—' ? null : value ?? null
           })
-          exportRows.push({ cells, shortage: row.shortage > 0n })
+          exportRows.push({ cells, shortage: row.shortage > 0n, zeroQuantity: row.zeroQuantity })
         }
       }
       await downloadBomExcel({
@@ -228,7 +229,8 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
       </p>
       {showPrice && incomplete && <p className="ims-bom-plan-note">Rows with unavailable stock or a missing or conflicting unit price are excluded from the total.</p>}
       {downloadError && <p className="ims-error" role="alert">{downloadError}</p>}
-      <Table rows={rows} columns={columns} scrollLabel="BOM details table" rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
+      <Table rows={rows} columns={columns} scrollLabel="BOM details table"
+        rowClassName={(row) => row.zeroQuantity ? 'ims-bom-zero' : row.shortage > 0n ? 'ims-bom-shortage' : undefined}
         footer={showPrice ? { label: totalLabel, value: formatRequiredAmount(grandTotal) } : undefined}
         groupBy={groupBy}
         renderCell={(key, row) => {

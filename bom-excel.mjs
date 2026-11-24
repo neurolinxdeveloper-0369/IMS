@@ -67,14 +67,15 @@ export function createBomExcel({ reference, project, production, bomBasis, colum
       const lineCount = Math.max(...widths.map((width, index) =>
         String(row.cells[index] ?? '').split('\n').reduce((size, line) => size + Math.max(1, Math.ceil(line.length / width)), 0),
       ))
+      const backgroundColor = row.zeroQuantity ? '#E9F4FF' : row.shortage ? '#FFF0DB' : undefined
       return columns.map(([key], index) => dataCell(row.cells[index], key, {
         height: Math.min(400, 6 + 15 * lineCount),
         wrap: true,
         alignVertical: 'top',
         bottomBorderColor: '#E1E6DF',
         bottomBorderStyle: 'thin',
-        ...(row.shortage ? { backgroundColor: '#FFF0DB' } : {}),
-        ...(row.shortage && ['shortage', 'balance', 'requiredAmount'].includes(key) ? { fontWeight: 'bold', textColor: '#804213' } : {}),
+        backgroundColor,
+        ...(!row.zeroQuantity && row.shortage && ['shortage', 'balance', 'requiredAmount'].includes(key) ? { fontWeight: 'bold', textColor: '#804213' } : {}),
       }))
     }),
   ]
