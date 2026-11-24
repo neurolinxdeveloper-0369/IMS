@@ -257,8 +257,13 @@ createServer((request, response) => {
     if (error instanceof RequestError && !response.headersSent) {
       return json(response, error.status, { message: error.message })
     }
-    console.error('IMS authentication request failed.')
-    if (!response.headersSent) json(response, 503, { message: 'Sign-in service is unavailable.' })
+    const inventoryRequest = request.url === '/IMS/api/inventory' || request.url?.startsWith('/IMS/api/inventory/')
+    const service = inventoryRequest ? 'inventory' : 'authentication'
+    const code = typeof error?.code === 'string' && /^[A-Z0-9_]{1,32}$/.test(error.code) ? error.code : undefined
+    console.error(`IMS ${service} request failed.`, { method: request.method, code })
+    if (!response.headersSent) json(response, 503, {
+      message: inventoryRequest ? 'Inventory service is unavailable.' : 'Sign-in service is unavailable.',
+    })
     else response.end()
   })
 }).listen(Number(process.env.IMS_AUTH_PORT ?? 3001), process.env.IMS_AUTH_HOST ?? '0.0.0.0')

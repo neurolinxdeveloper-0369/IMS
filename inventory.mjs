@@ -236,8 +236,12 @@ export async function addBomComponent(pool, actor, input) {
     check(row.quantity > 0, 'BOM component quantity must be greater than zero.')
     if (creatingItem) {
       check(!item.unit.includes('\0'), 'Enter a valid unit of measure.')
-      const existing = await db.query('SELECT 1 FROM ims_items WHERE reference = $1', [item.code])
-      check(!existing.rowCount, 'That SKU already exists. Select Use existing item to choose it.', 409)
+      const { rows: [existing] } = await db.query(`
+        SELECT EXISTS (SELECT 1 FROM ims_items WHERE reference = $1) AS in_catalog,
+          EXISTS (SELECT 1 FROM ims_records WHERE kind = 'items' AND reference = $1) AS in_legacy
+      `, [item.code])
+      check(!existing.in_catalog, 'That SKU already exists. Select Use existing item to choose it.', 409)
+      check(!existing.in_legacy, 'That SKU exists in older IMS records but is missing from the item catalog. Ask an administrator to reconcile the item before reusing its SKU.', 409)
       const created = await insertInventoryRecord(db, actor, 'items', item)
       item.id = String(created.id)
       await audit(db, actor.userId, 'Created item', item.code)
@@ -261,10 +265,11 @@ export async function addBomComponent(pool, actor, input) {
     }
 
     const line = { item: item.id, quantity: row.quantity }
+    // Use the current mirrored BOM lines so an older compatibility record cannot restore a removed component.
     await db.query(`
-      UPDATE ims_records SET body = jsonb_set(body, '{lines}', (body->'lines') || jsonb_build_array($2::jsonb))
+      UPDATE ims_records SET body = jsonb_set(body, '{lines}', $2::jsonb)
       WHERE id = $1 AND kind = 'boms'
-    `, [bom.id, line])
+    `, [bom.id, JSON.stringify([...bom.lines, line])])
     await insertBomSourceRow(db, bom.id, lastRow + 1, { ...row, item: item.id })
     await audit(db, actor.userId, 'Added BOM component', bom.number + ' · ' + item.code)
     return { id: bom.id, bomId: bom.id, ...line }
