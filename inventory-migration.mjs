@@ -232,3 +232,19 @@ export async function migrateBomSourceRows(db) {
     INSERT INTO ims_schema_migrations (version) VALUES (3);
   `)
 }
+
+export async function migrateBomComponentNames(db) {
+  if ((await db.query('SELECT 1 FROM ims_schema_migrations WHERE version = 4')).rowCount) return
+  await db.query(`
+    CREATE TABLE ims_bom_component_names (
+      bom_id bigint NOT NULL REFERENCES ims_boms(id) ON DELETE CASCADE,
+      item_id bigint NOT NULL,
+      name text NOT NULL CHECK (char_length(name) BETWEEN 1 AND 240 AND name = btrim(name)),
+      PRIMARY KEY (bom_id, item_id),
+      -- An append rewrites the mirrored lines, so validate the pair at commit.
+      FOREIGN KEY (bom_id, item_id) REFERENCES ims_boms_lines(document_id, item_id)
+        DEFERRABLE INITIALLY DEFERRED
+    );
+    INSERT INTO ims_schema_migrations (version) VALUES (4);
+  `)
+}

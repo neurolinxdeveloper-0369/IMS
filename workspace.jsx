@@ -148,7 +148,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
       sourceRows,
       category: sourceRows.find((source) => source.category)?.category.replace(/^\d+[.)]\s*/, '').trim(),
       sku: item?.code ?? sourceRows[0]?.sku ?? '—',
-      name: item?.name ?? '—',
+      name: line?.displayName ?? item?.name ?? '—',
       quantity,
       zeroQuantity: quantity === 0,
       ...plan,
@@ -285,62 +285,82 @@ function Field({ field, data, value, onChange }) {
   )
 }
 
-function BomComponentEditor({ bom, items, save, busy }) {
-  const [open, setOpen] = useState(false)
+function BomComponentEditor({ bom, items, add, rename, busy }) {
+  const [mode, setMode] = useState('')
   const [search, setSearch] = useState('')
   const [itemId, setItemId] = useState('')
-  const usedItems = new Set(bom.lines.map((line) => line.item))
-  const availableItems = items.filter((item) => !usedItems.has(item.id))
+  const [name, setName] = useState('')
+  const renaming = mode === 'rename'
+  const componentLines = new Map(bom.lines.map((line) => [line.item, line]))
+  const availableItems = items.filter((item) => componentLines.has(item.id) === renaming)
+    .map((item) => ({ ...item, name: componentLines.get(item.id)?.displayName ?? item.name }))
   const query = search.trim().toLowerCase()
   const matches = query ? availableItems.filter((item) => matchesItemSearch(item, query)) : availableItems
   const selected = availableItems.find((item) => item.id === itemId)
 
   function close() {
-    setOpen(false)
+    setMode('')
     setSearch('')
     setItemId('')
+    setName('')
   }
 
-  if (!open) return <button className="ims-button ims-secondary" type="button" disabled={busy}
-    onClick={() => setOpen(true)}>Add component</button>
+  if (!mode) return <div className="ims-actions">
+    <button className="ims-button ims-secondary" type="button" disabled={busy}
+      onClick={() => setMode('add')}>Add component</button>
+    <button className="ims-button ims-secondary" type="button" disabled={busy || !bom.lines.length}
+      onClick={() => setMode('rename')}>Rename component</button>
+  </div>
 
   return <form className="ims-form" onSubmit={async (event) => {
     event.preventDefault()
     const fields = Object.fromEntries(new FormData(event.currentTarget))
+    const save = renaming ? rename : add
     if (await save({ ...fields, bomId: bom.id })) close()
   }}>
     <fieldset className="ims-lines" disabled={busy}>
-      <legend>Add component</legend>
-      {!availableItems.length && <p className="ims-empty">Add the component to the Items catalog first.</p>}
+      <legend>{renaming ? 'Rename component' : 'Add component'}</legend>
+      {renaming && <p className="ims-empty">The name applies to this BOM and its Excel download.</p>}
+      {!renaming && !availableItems.length && <p className="ims-empty">Add the component to the Items catalog first.</p>}
       <div className="ims-form-grid">
         <label className="ims-field"><span>Search item</span>
           <input type="search" placeholder="SKU or item name" value={search} onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} />
         </label>
         <label className="ims-field"><span>Item</span>
-          <select name="item" value={selected?.id ?? ''} required onChange={(event) => setItemId(event.target.value)}>
+          <select name="item" value={selected?.id ?? ''} required onChange={(event) => {
+            const nextItem = event.target.value
+            setItemId(nextItem)
+            if (renaming) setName(availableItems.find((item) => item.id === nextItem)?.name ?? '')
+          }}>
             <option value="">{query && !matches.length ? 'No matching items' : 'Select an item'}</option>
             {selected && !matches.includes(selected) && <option value={selected.id}>{labelFor(selected)}</option>}
             {matches.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
           </select>
         </label>
-        <label className="ims-field"><span>Qty / Card</span>
-          <input name="quantity" type="number" min="0.001" max="999999999.999" step="0.001" defaultValue="1" required />
-        </label>
-        <label className="ims-field"><span>Unit price (INR) <small>optional</small></span>
-          <input name="unitPrice" type="number" min="0" max="999999999.99" step="0.01" />
-        </label>
+        {renaming ? <label className="ims-field"><span>Component name</span>
+          <input name="name" value={name} onChange={(event) => setName(event.target.value)} maxLength={240} required disabled={!selected} />
+        </label> : <>
+          <label className="ims-field"><span>Qty / Card</span>
+            <input name="quantity" type="number" min="0.001" max="999999999.999" step="0.001" defaultValue="1" required />
+          </label>
+          <label className="ims-field"><span>Unit price (INR) <small>optional</small></span>
+            <input name="unitPrice" type="number" min="0" max="999999999.99" step="0.01" />
+          </label>
+        </>}
       </div>
-      <div className="ims-form-grid">
+      {!renaming && <div className="ims-form-grid">
         {[
           ['category', 'Category'], ['designators', 'Designators'], ['manufacturer', 'Manufacturer'],
           ['part', 'Part No. / Value'], ['technicalData', 'Technical Data'],
         ].map(([name, label]) => <label className="ims-field" key={name}>
           <span>{label} <small>optional</small></span><input name={name} maxLength={240} />
         </label>)}
-      </div>
+      </div>}
       <div className="ims-actions">
-        <button className="ims-button" disabled={!selected}>Save component</button>
+        <button className="ims-button" disabled={!selected || (renaming && !name.trim())}>
+          {renaming ? 'Save name' : 'Save component'}
+        </button>
         <button className="ims-button ims-secondary" type="button" onClick={close}>Cancel</button>
       </div>
     </fieldset>
@@ -750,7 +770,8 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
                 {page === 'boms' && canWrite(session.role, 'boms') && <BomComponentEditor key={'component-' + detail.id} bom={detail}
                   items={data.records.items} busy={busy}
-                  save={(fields) => run(() => api('inventory/boms/components', fields), 'Component added to ' + detail.number + '.')} />}
+                  add={(fields) => run(() => api('inventory/boms/components', fields), 'Component added to ' + detail.number + '.')}
+                  rename={(fields) => run(() => api('inventory/boms/components/rename', fields), 'Component renamed in ' + detail.number + '.')} />}
                 {detail.lines && (page === 'boms' ? (
                   <BomStockPlan key={detail.id} reference={detail.number} project={render('project', detail)}
                     lines={detail.lines} balances={stockRows}

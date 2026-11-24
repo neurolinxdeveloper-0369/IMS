@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { sections, canRead, canWrite } from './inventory-shared.mjs'
-import { migrateBomSourceRows, migrateInventory, migrateInventoryReads } from './inventory-migration.mjs'
+import { migrateBomComponentNames, migrateBomSourceRows, migrateInventory, migrateInventoryReads } from './inventory-migration.mjs'
 
 export async function initInventory(pool) {
   await transaction(pool, async (db) => {
@@ -32,6 +32,7 @@ export async function initInventory(pool) {
     await migrateInventory(db)
     await migrateInventoryReads(db)
     await migrateBomSourceRows(db)
+    await migrateBomComponentNames(db)
   })
 }
 
@@ -247,6 +248,27 @@ export async function addBomComponent(pool, actor, input) {
   })
 }
 
+export async function renameBomComponent(pool, actor, input) {
+  check(canWrite(actor.role, 'boms'), 'You do not have permission for this action.', 403)
+  const name = typeof input?.name === 'string' ? input.name.trim() : ''
+  check(name.length > 0 && name.length <= 240 && !name.includes('\0'),
+    'Enter a component display name between 1 and 240 characters.')
+  return transaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(3140322)')
+    const bom = await findRecord(db, 'boms', input.bomId)
+    const item = await findRecord(db, 'items', input.item)
+    check(bom.lines.some((line) => line.item === item.id), 'This item is not on the BOM.', 409)
+
+    const result = await db.query(`
+      INSERT INTO ims_bom_component_names (bom_id, item_id, name) VALUES ($1, $2, $3)
+      ON CONFLICT (bom_id, item_id) DO UPDATE SET name = EXCLUDED.name
+      WHERE ims_bom_component_names.name IS DISTINCT FROM EXCLUDED.name
+    `, [bom.id, item.id, name])
+    if (result.rowCount) await audit(db, actor.userId, 'Renamed BOM component', bom.number + ' · ' + item.code)
+    return { bomId: bom.id, item: item.id, displayName: name }
+  })
+}
+
 async function linked(db, kind, source) {
   const { rows } = await db.query('SELECT body FROM ims_inventory_read WHERE kind = $1 AND source_id = $2', [kind, source])
   return rows.map((row) => row.body)
@@ -382,14 +404,20 @@ export async function saveInventory(pool, actor, kind, input) {
 }
 
 export async function readInventory(pool, actor) {
-  const { rows, balances, imported } = await transaction(pool, async (db) => {
+  const { rows, balances, imported, componentNames } = await transaction(pool, async (db) => {
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
     const { rows } = await db.query('SELECT id::text, kind, body, created_at AS "createdAt" FROM ims_inventory_read ORDER BY ims_inventory_read.id DESC')
     const imported = await db.query(`
       SELECT bom_id::text AS bom, item_id::text AS item, quantity::float8 AS quantity, unit_price::float8 AS "unitPrice", fields
       FROM ims_bom_source_rows ORDER BY bom_id, row_number
     `)
-    return { rows, balances: await stock(db), imported: Map.groupBy(imported.rows, (row) => row.bom) }
+    const componentNames = await db.query('SELECT bom_id::text AS bom, item_id::text AS item, name FROM ims_bom_component_names')
+    return {
+      rows,
+      balances: await stock(db),
+      imported: Map.groupBy(imported.rows, (row) => row.bom),
+      componentNames: Map.groupBy(componentNames.rows, (row) => row.bom),
+    }
   })
   const records = Object.fromEntries(Object.keys(sections).map((kind) => [kind, []]))
   for (const { id, kind, body, createdAt } of rows) {
@@ -409,6 +437,12 @@ export async function readInventory(pool, actor) {
         sum + (BigInt(fixed(line.quantity)) * BigInt(fixed(line.price, 100)) + 500n) / 1000n
       ), 0n)
       record.total = (cents / 100n).toString() + '.' + (cents % 100n).toString().padStart(2, '0')
+    }
+    if (kind === 'boms' && componentNames.has(id)) {
+      const names = new Map(componentNames.get(id).map(({ item, name }) => [item, name]))
+      record.lines = record.lines.map((line) =>
+        names.has(line.item) ? { ...line, displayName: names.get(line.item) } : line,
+      )
     }
     records[kind].push(record)
   }
