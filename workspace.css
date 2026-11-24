@@ -72,6 +72,7 @@
 .ims-table-wrap tr:last-child td { border-bottom: 0; }
 .ims-bom-plan-controls { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
 .ims-bom-plan-controls .ims-field { width: min(100%, 14rem); }
+.ims-bom-download { align-self: end; min-height: 2.65rem; margin: 0 0 .65rem; }
 .ims-bom-plan-note { color: var(--ims-muted); margin: 0 0 .75rem; }
 .ims-bom-plan-status { font-weight: 650; margin: .65rem 0; }
 .ims-bom-plan td { vertical-align: top; }

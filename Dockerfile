@@ -2,7 +2,7 @@ FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY index.html vite.config.mjs welcome.jsx welcome.css workspace.jsx workspace.css inventory-shared.mjs bom-workbook.mjs ./
+COPY index.html vite.config.mjs welcome.jsx welcome.css workspace.jsx workspace.css inventory-shared.mjs bom-workbook.mjs bom-excel.mjs ./
 RUN npm run build
 
 FROM node:24-alpine AS auth

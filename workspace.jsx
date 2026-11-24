@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
-import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, joinBomPlanningRows, parseBomWorkbookSheet } from './bom-workbook.mjs'
+import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, excelStockQuantity, joinBomPlanningRows, parseBomWorkbookSheet } from './bom-workbook.mjs'
 import './workspace.css'
 
 const groups = {
@@ -74,14 +74,19 @@ function formatCell(key, value, row, data, page) {
   return value ?? '—'
 }
 
-function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, scrollLabel, empty = 'No records yet.' }) {
-  if (!rows.length) return <p className="ims-empty">{empty}</p>
+function groupTableRows(rows, groupBy) {
   const rowGroups = new Map()
   for (const row of rows) {
     const group = groupBy?.(row) ?? ''
     if (!rowGroups.has(group)) rowGroups.set(group, [])
     rowGroups.get(group).push(row)
   }
+  return rowGroups
+}
+
+function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, scrollLabel, empty = 'No records yet.' }) {
+  if (!rows.length) return <p className="ims-empty">{empty}</p>
+  const rowGroups = groupTableRows(rows, groupBy)
   return (
     <div className="ims-table-wrap" tabIndex={scrollLabel ? 0 : undefined}
       role={scrollLabel ? 'region' : undefined} aria-label={scrollLabel}>
@@ -114,9 +119,11 @@ function formatStockThousandths(value) {
   return (value < 0n ? '−' : '') + stockNumber.format(absolute / 1000n) + (fraction ? '.' + fraction : '')
 }
 
-function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
+function BomStockPlan({ reference, project, lines, balances, sourceRows, showPrice }) {
   const [production, setProduction] = useState('1')
   const [bomBasis, setBomBasis] = useState('1')
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
   const productionUnits = wholeProductionUnits(production)
   const bomUnits = wholeProductionUnits(bomBasis)
   const stockByItem = new Map(balances.map((item) => [String(item.id), item]))
@@ -137,6 +144,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
   const valid = productionUnits !== null && bomUnits !== null
   const hasWorkbook = Boolean(sourceRows?.length)
   const hasCategories = rows.some((row) => row.category)
+  const groupBy = hasCategories ? (row) => row.category?.toUpperCase() || 'UNCATEGORIZED' : undefined
   const hasGroupedRows = rows.some((row) => row.sourceRows.length > 1)
   const workbookColumns = hasWorkbook ? bomWorkbookColumns
     .filter(([key]) => key !== 'quantity' && (showPrice || key !== 'unitPrice')) : []
@@ -148,6 +156,38 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
     ['stock', 'Current stock'], ['total', 'Total needed'],
     ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
   ]
+
+  async function downloadExcel() {
+    if (!valid || downloading) return
+    setDownloading(true)
+    setDownloadError('')
+    try {
+      const { downloadBomExcel } = await import('./bom-excel.mjs')
+      const exportRows = []
+      for (const [heading, members] of groupTableRows(rows, groupBy)) {
+        if (heading) exportRows.push({ heading })
+        for (const row of members) {
+          const cells = columns.map(([key]) => {
+            if (key.startsWith('source-')) {
+              const field = key.slice(7)
+              const values = row.sourceRows.map((source) => source[field])
+              if (values.every((value) => value == null || value === '')) return null
+              return values.length === 1 ? values[0] : values.map((value) => formatWorkbookCell(field, value)).join('\n')
+            }
+            const value = row[key]
+            return typeof value === 'bigint' ? excelStockQuantity(value) : value === '—' ? null : value ?? null
+          })
+          exportRows.push({ cells, shortage: row.shortage > 0n })
+        }
+      }
+      await downloadBomExcel({ reference, project, production: Number(productionUnits), bomBasis: Number(bomUnits), columns, rows: exportRows })
+    } catch {
+      setDownloadError('The Excel file could not be generated. Try the download again.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <section className={hasWorkbook ? 'ims-bom-plan ims-bom-plan-imported' : 'ims-bom-plan'} aria-label="BOM stock plan">
       <div className="ims-bom-plan-controls">
@@ -159,14 +199,18 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
           <input type="text" inputMode="numeric" maxLength={9} value={bomBasis} aria-invalid={bomUnits === null}
             onChange={(event) => setBomBasis(event.target.value)} />
         </label>
+        <button className="ims-button ims-bom-download" type="button" onClick={downloadExcel} disabled={!valid || downloading}>
+          {downloading ? 'Preparing Excel…' : 'Download Excel'}
+        </button>
       </div>
       <p className="ims-bom-plan-note">Use 1 for a per-unit BOM. For a BOM already entered as a batch, enter the number of units it covers.</p>
       <p className="ims-bom-plan-status" role="status">
         {!valid ? 'Enter positive whole numbers for both quantities.'
           : shortCount ? `${shortCount} of ${lines.length} items short for this run.` : 'No shortages in known stock.'}
       </p>
+      {downloadError && <p className="ims-error" role="alert">{downloadError}</p>}
       <Table rows={rows} columns={columns} scrollLabel="BOM details table" rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
-        groupBy={hasCategories ? (row) => row.category?.toUpperCase() || 'UNCATEGORIZED' : undefined}
+        groupBy={groupBy}
         renderCell={(key, row) => {
           if (key.startsWith('source-')) {
             const field = key.slice(7)
@@ -566,7 +610,8 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetail(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
                 {detail.lines && (page === 'boms' ? (
-                  <BomStockPlan key={detail.id} lines={detail.lines} balances={stockRows}
+                  <BomStockPlan key={detail.id} reference={detail.number} project={render('project', detail)}
+                    lines={detail.lines} balances={stockRows}
                     sourceRows={detail.sourceRows} showPrice={session.role !== 'store_person'} />
                 ) : (
                   <Table rows={detail.lines.map((line) => ({ ...line, id: line.item }))}

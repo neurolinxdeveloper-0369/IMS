@@ -95,3 +95,14 @@ export function joinBomPlanningRows(lines, sourceRows = []) {
   }
   return rows
 }
+
+export function excelStockQuantity(thousandths) {
+  if (thousandths == null) return null
+  // Excel retains at most 15 significant digits in a numeric cell.
+  if (thousandths >= -999999999999999n && thousandths <= 999999999999999n) {
+    return Number(thousandths) / 1000
+  }
+  const absolute = thousandths < 0n ? -thousandths : thousandths
+  const fraction = (absolute % 1000n).toString().padStart(3, '0').replace(/0+$/, '')
+  return (thousandths < 0n ? '-' : '') + absolute / 1000n + (fraction ? '.' + fraction : '')
+}
