@@ -283,6 +283,7 @@ function Field({ field, data, value, onChange }) {
 
 function RecordForm({ page, data, initial, onSave, cancel, busy }) {
   const spec = sections[page]
+  const isOpening = page === 'openings'
   const [lines, setLines] = useState([{ ...emptyLine }])
   const [source, setSource] = useState('')
   const [project, setProject] = useState('')
@@ -342,7 +343,8 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
         if (!reading && preview && !preview.errors.length) onSave({ ...fields, rows: preview.rows })
         return
       }
-      onSave({ ...fields, ...(spec.lines ? { lines } : {}), id: initial?.id })
+      const submittedLines = isOpening ? lines.map(({ item, quantity }) => ({ item, quantity })) : lines
+      onSave({ ...fields, ...(spec.lines ? { lines: submittedLines } : {}), id: initial?.id })
     }}>
       <h2>{initial ? 'Edit ' : 'New '}{spec.single}</h2>
       <div className="ims-form-grid">
@@ -407,7 +409,7 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
       {spec.lines && !workbook && (
         <fieldset className="ims-lines">
           <legend>Items</legend>
-          {page === 'openings' && <div className="ims-form-grid">
+          {isOpening && <div className="ims-form-grid">
             <label className="ims-field">
               <span>Filter items by project</span>
               <select value={openingProject} onChange={(event) => {
@@ -430,24 +432,39 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
           {!items.length && <p className="ims-empty">{openingBom
             ? 'This BOM has no catalog items.'
             : openingProject ? 'This project has no items in its BOMs.' : 'Add an item to the catalog before posting this record.'}</p>}
-          {lines.map((line, index) => (
-            <div className="ims-line" key={index}>
-              <label className="ims-field"><span>Item</span>
-                <select value={line.item} onChange={(event) => updateLine(index, 'item', event.target.value)} required>
-                  <option value="">Select an item</option>
-                  {line.item && openingItemIds && !openingItemIds.has(line.item) && (
-                    <option value={line.item}>{labelFor(data.records.items.find((item) => item.id === line.item))} (outside current filter)</option>
-                  )}
-                  {items.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
-                </select>
-              </label>
-              <label className="ims-field"><span>Quantity</span><input type="number" min="0.001" step="0.001" value={line.quantity}
-                onChange={(event) => updateLine(index, 'quantity', event.target.value)} required /></label>
-              {spec.prices && <label className="ims-field"><span>Unit price (INR)</span><input type="number" min="0" step="0.01" value={line.price}
-                onChange={(event) => updateLine(index, 'price', event.target.value)} required /></label>}
-              {lines.length > 1 && <button className="ims-button ims-secondary" type="button" onClick={() => setLines(lines.filter((_, current) => current !== index))}>Remove</button>}
-            </div>
-          ))}
+          {lines.map((line, index) => {
+            const search = line.itemSearch ?? ''
+            const query = search.trim().toLowerCase()
+            const itemOptions = query ? items.filter((item) => (
+              item.code.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)
+            )) : items
+            const hiddenSelection = isOpening && line.item && !itemOptions.some((item) => item.id === line.item)
+              ? data.records.items.find((item) => item.id === line.item) : null
+            return (
+              <div className="ims-line" key={index}>
+                <div>
+                  {isOpening && <label className="ims-field"><span>Search item</span>
+                    <input type="search" value={search} placeholder="SKU or item name"
+                      onChange={(event) => updateLine(index, 'itemSearch', event.target.value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} />
+                  </label>}
+                  <label className="ims-field"><span>Item</span>
+                    <select value={line.item} onChange={(event) => updateLine(index, 'item', event.target.value)} required>
+                      <option value="">{query && !itemOptions.length ? 'No matching items' : 'Select an item'}</option>
+                      {hiddenSelection && <option value={hiddenSelection.id}>{labelFor(hiddenSelection)}
+                        {openingItemIds && !openingItemIds.has(hiddenSelection.id) && ' (outside current filter)'}</option>}
+                      {itemOptions.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label className="ims-field"><span>Quantity</span><input type="number" min="0.001" step="0.001" value={line.quantity}
+                  onChange={(event) => updateLine(index, 'quantity', event.target.value)} required /></label>
+                {spec.prices && <label className="ims-field"><span>Unit price (INR)</span><input type="number" min="0" step="0.01" value={line.price}
+                  onChange={(event) => updateLine(index, 'price', event.target.value)} required /></label>}
+                {lines.length > 1 && <button className="ims-button ims-secondary" type="button" onClick={() => setLines(lines.filter((_, current) => current !== index))}>Remove</button>}
+              </div>
+            )
+          })}
           <button type="button" className="ims-button ims-secondary" disabled={lines.length >= 100} onClick={() => setLines([...lines, { ...emptyLine }])}>Add line</button>
         </fieldset>
       )}
