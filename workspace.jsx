@@ -748,7 +748,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
               {detail && <section className="ims-panel ims-form">
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetailId(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
-                {page === 'boms' && canWrite(session.role, 'boms') && <BomComponentEditor key={detail.id} bom={detail}
+                {page === 'boms' && canWrite(session.role, 'boms') && <BomComponentEditor key={'component-' + detail.id} bom={detail}
                   items={data.records.items} busy={busy}
                   save={(fields) => run(() => api('inventory/boms/components', fields), 'Component added to ' + detail.number + '.')} />}
                 {detail.lines && (page === 'boms' ? (
