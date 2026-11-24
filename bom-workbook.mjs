@@ -39,7 +39,8 @@ function decimal(value, scale) {
 }
 
 function priceText(value) {
-  const stripped = value.replace(/^(?:₹|INR)\s*/i, '').trim()
+  // Some spreadsheet exports replace the rupee sign with ? or U+FFFD.
+  const stripped = value.replace(/^(?:₹|INR|[?\uFFFD])\s*(?=\d)/i, '')
   if (!stripped.includes(',')) return stripped
   if (!/^(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d{1,2})?$/.test(stripped)) return stripped
   return stripped.replaceAll(',', '')
