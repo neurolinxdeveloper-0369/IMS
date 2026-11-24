@@ -3,7 +3,7 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
 import { promisify } from 'node:util'
 import pg from 'pg'
 import { roles } from './inventory-shared.mjs'
-import { audit, importBom, initInventory, readAudit, readInventory, RequestError, saveInventory, transaction } from './inventory.mjs'
+import { addBomComponent, audit, importBom, initInventory, readAudit, readInventory, RequestError, saveInventory, transaction } from './inventory.mjs'
 
 const pool = new pg.Pool({ connectionTimeoutMillis: 3000 })
 const deriveKey = promisify(scrypt)
@@ -224,6 +224,9 @@ async function route(request, response) {
   if (method === 'GET' && url === '/IMS/api/inventory') return json(response, 200, await readInventory(pool, user))
   if (method === 'POST' && url === '/IMS/api/inventory/boms/import') {
     return json(response, 200, await importBom(pool, user, await readBody(request, 768 * 1024)))
+  }
+  if (method === 'POST' && url === '/IMS/api/inventory/boms/components') {
+    return json(response, 200, await addBomComponent(pool, user, await readBody(request, 8192)))
   }
   const record = /^\/IMS\/api\/inventory\/([a-z]+)$/.exec(url)
   if (method === 'POST' && record) {

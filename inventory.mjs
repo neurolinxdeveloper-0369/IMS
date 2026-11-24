@@ -126,8 +126,7 @@ async function readLines(db, input, prices) {
 
 const bomImportFields = ['sku', 'name', 'category', 'designators', 'manufacturer', 'part', 'technicalData', 'serial']
 
-function parseBomSourceRow(input, rowNumber) {
-  const label = 'BOM row ' + rowNumber
+function parseBomSourceRow(input, label) {
   check(input && typeof input === 'object' && !Array.isArray(input), label + ' is invalid.')
   const fields = {}
   for (const key of bomImportFields) {
@@ -160,10 +159,17 @@ async function insertInventoryRecord(db, actor, kind, body) {
   return record
 }
 
+function insertBomSourceRow(db, bomId, rowNumber, row) {
+  return db.query(`
+    INSERT INTO ims_bom_source_rows (bom_id, row_number, item_id, quantity, unit_price, fields)
+    VALUES ($1, $2, $3, $4, $5, $6)
+  `, [bomId, rowNumber, row.item ?? null, row.quantity, row.unitPrice, row.fields])
+}
+
 export async function importBom(pool, actor, input) {
   check(canWrite(actor.role, 'boms'), 'You do not have permission for this action.', 403)
   check(Array.isArray(input?.rows) && input.rows.length > 0 && input.rows.length <= 100, 'Import between 1 and 100 BOM rows.')
-  const rows = input.rows.map((row, index) => parseBomSourceRow(row, index + 1))
+  const rows = input.rows.map((row, index) => parseBomSourceRow(row, 'BOM row ' + (index + 1)))
   check(rows.some((row) => row.quantity > 0), 'Add at least one BOM row with a positive quantity.')
 
   return transaction(pool, async (db) => {
@@ -195,13 +201,49 @@ export async function importBom(pool, actor, input) {
     body.lines = Array.from(totals, ([item, quantity]) => ({ item, quantity: quantity / 1000 }))
     const { id } = await insertInventoryRecord(db, actor, 'boms', body)
     for (const [index, row] of rows.entries()) {
-      await db.query(`
-        INSERT INTO ims_bom_source_rows (bom_id, row_number, item_id, quantity, unit_price, fields)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `, [id, index + 1, row.item ?? null, row.quantity, row.unitPrice, row.fields])
+      await insertBomSourceRow(db, id, index + 1, row)
     }
     await audit(db, actor.userId, 'Imported BOM', body.number)
     return { id, lineCount: body.lines.length, itemsCreated }
+  })
+}
+
+export async function addBomComponent(pool, actor, input) {
+  check(canWrite(actor.role, 'boms'), 'You do not have permission for this action.', 403)
+  return transaction(pool, async (db) => {
+    await db.query('SELECT pg_advisory_xact_lock(3140322)')
+    const bom = await findRecord(db, 'boms', input?.bomId)
+    const item = await findRecord(db, 'items', input?.item)
+    check(!bom.lines.some((line) => line.item === item.id), 'This item is already on the BOM.', 409)
+    check(bom.lines.length < 100, 'A BOM can contain up to 100 items.', 409)
+    const row = parseBomSourceRow({ ...input, sku: item.code, name: item.name }, 'BOM component')
+    check(row.quantity > 0, 'BOM component quantity must be greater than zero.')
+
+    const { rows: [source] } = await db.query(`
+      SELECT max(row_number) AS last_row FROM ims_bom_source_rows WHERE bom_id = $1
+    `, [bom.id])
+    let lastRow = source.last_row
+    if (lastRow === null) {
+      // Manual BOMs lack source rows. Preserve their line order in the planner and Excel export.
+      const seeded = await db.query(`
+        INSERT INTO ims_bom_source_rows (bom_id, row_number, item_id, quantity, fields)
+        SELECT l.document_id, l.line_number, l.item_id, l.quantity,
+          jsonb_build_object('sku', i.reference, 'name', i.name)
+        FROM ims_boms_lines l
+        JOIN ims_items i ON i.id = l.item_id
+        WHERE l.document_id = $1
+      `, [bom.id])
+      lastRow = seeded.rowCount
+    }
+
+    const line = { item: item.id, quantity: row.quantity }
+    await db.query(`
+      UPDATE ims_records SET body = jsonb_set(body, '{lines}', (body->'lines') || jsonb_build_array($2::jsonb))
+      WHERE id = $1 AND kind = 'boms'
+    `, [bom.id, line])
+    await insertBomSourceRow(db, bom.id, lastRow + 1, { ...row, item: item.id })
+    await audit(db, actor.userId, 'Added BOM component', bom.number + ' · ' + item.code)
+    return { id: bom.id, bomId: bom.id, ...line }
   })
 }
 

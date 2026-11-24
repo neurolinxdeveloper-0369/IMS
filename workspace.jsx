@@ -58,6 +58,10 @@ function labelFor(record) {
   return record?.name ? record.code + ' · ' + record.name : record?.number
 }
 
+function matchesItemSearch(item, query) {
+  return item.code.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)
+}
+
 function formatCell(key, value, row, data, page) {
   if (key === 'source') {
     return labelFor(data?.records[sections[page]?.fields.find(([field]) => field === key)?.[2]]?.find((record) => record.id === value)) ?? value
@@ -281,6 +285,68 @@ function Field({ field, data, value, onChange }) {
   )
 }
 
+function BomComponentEditor({ bom, items, save, busy }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [itemId, setItemId] = useState('')
+  const usedItems = new Set(bom.lines.map((line) => line.item))
+  const availableItems = items.filter((item) => !usedItems.has(item.id))
+  const query = search.trim().toLowerCase()
+  const matches = query ? availableItems.filter((item) => matchesItemSearch(item, query)) : availableItems
+  const selected = availableItems.find((item) => item.id === itemId)
+
+  function close() {
+    setOpen(false)
+    setSearch('')
+    setItemId('')
+  }
+
+  if (!open) return <button className="ims-button ims-secondary" type="button" disabled={busy}
+    onClick={() => setOpen(true)}>Add component</button>
+
+  return <form className="ims-form" onSubmit={async (event) => {
+    event.preventDefault()
+    const fields = Object.fromEntries(new FormData(event.currentTarget))
+    if (await save({ ...fields, bomId: bom.id })) close()
+  }}>
+    <fieldset className="ims-lines" disabled={busy}>
+      <legend>Add component</legend>
+      {!availableItems.length && <p className="ims-empty">Add the component to the Items catalog first.</p>}
+      <div className="ims-form-grid">
+        <label className="ims-field"><span>Search item</span>
+          <input type="search" placeholder="SKU or item name" value={search} onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} />
+        </label>
+        <label className="ims-field"><span>Item</span>
+          <select name="item" value={selected?.id ?? ''} required onChange={(event) => setItemId(event.target.value)}>
+            <option value="">{query && !matches.length ? 'No matching items' : 'Select an item'}</option>
+            {selected && !matches.includes(selected) && <option value={selected.id}>{labelFor(selected)}</option>}
+            {matches.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
+          </select>
+        </label>
+        <label className="ims-field"><span>Qty / Card</span>
+          <input name="quantity" type="number" min="0.001" max="999999999.999" step="0.001" defaultValue="1" required />
+        </label>
+        <label className="ims-field"><span>Unit price (INR) <small>optional</small></span>
+          <input name="unitPrice" type="number" min="0" max="999999999.99" step="0.01" />
+        </label>
+      </div>
+      <div className="ims-form-grid">
+        {[
+          ['category', 'Category'], ['designators', 'Designators'], ['manufacturer', 'Manufacturer'],
+          ['part', 'Part No. / Value'], ['technicalData', 'Technical Data'],
+        ].map(([name, label]) => <label className="ims-field" key={name}>
+          <span>{label} <small>optional</small></span><input name={name} maxLength={240} />
+        </label>)}
+      </div>
+      <div className="ims-actions">
+        <button className="ims-button" disabled={!selected}>Save component</button>
+        <button className="ims-button ims-secondary" type="button" onClick={close}>Cancel</button>
+      </div>
+    </fieldset>
+  </form>
+}
+
 function RecordForm({ page, data, initial, onSave, cancel, busy }) {
   const spec = sections[page]
   const isOpening = page === 'openings'
@@ -435,9 +501,7 @@ function RecordForm({ page, data, initial, onSave, cancel, busy }) {
           {lines.map((line, index) => {
             const search = line.itemSearch ?? ''
             const query = search.trim().toLowerCase()
-            const itemOptions = query ? items.filter((item) => (
-              item.code.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)
-            )) : items
+            const itemOptions = query ? items.filter((item) => matchesItemSearch(item, query)) : items
             const hiddenSelection = isOpening && line.item && !itemOptions.some((item) => item.id === line.item)
               ? data.records.items.find((item) => item.id === line.item) : null
             return (
@@ -539,7 +603,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
   const [data, setData] = useState(null)
   const [extras, setExtras] = useState([])
   const [form, setForm] = useState(null)
-  const [detail, setDetail] = useState(null)
+  const [detailId, setDetailId] = useState(null)
   const [search, setSearch] = useState('')
   const [message, setMessage] = useState('')
   const [failure, setFailure] = useState('')
@@ -547,6 +611,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
   const [revision, refresh] = useState(0)
   const spec = sections[page]
   const title = Object.values(groups).flat().find(([key]) => key === page)?.[1]
+  const detail = detailId ? data?.records[page]?.find((row) => row.id === detailId) : null
 
   useEffect(() => {
     if (session.mustChangePassword) return
@@ -564,7 +629,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
 
   function navigate(key) {
     setForm(null)
-    setDetail(null)
+    setDetailId(null)
     setExtras([])
     setSearch('')
     setFailure('')
@@ -582,6 +647,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
       setForm(null)
       refresh((count) => count + 1)
       setMessage(success)
+      return true
     } catch (error) {
       if (error.status === 401) onSession(null)
       else setFailure(error.message)
@@ -649,7 +715,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
         </header>
         <main id="workspace-main" tabIndex={-1} className={page === 'boms' && detail ? 'ims-main ims-main-bom' : 'ims-main'}>
           <div className="ims-page-title"><h1>{page === 'password' ? 'Account security' : title}</h1>
-            {spec && !form && data && canWrite(session.role, page) && <button className="ims-button" onClick={() => { setDetail(null); setForm({}) }}>New {spec.single}</button>}
+            {spec && !form && data && canWrite(session.role, page) && <button className="ims-button" onClick={() => { setDetailId(null); setForm({}) }}>New {spec.single}</button>}
             {page === 'users' && !form && <button className="ims-button" onClick={() => setForm({})}>Create account</button>}
             {page === 'stock' && stockRows.length > 0 && <button className="ims-button ims-secondary" onClick={() => exportStock(searchRows(stockRows))}>Export CSV</button>}
           </div>
@@ -680,8 +746,11 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                 onSave={(body) => run(() => api(page === 'boms' && body.rows ? 'inventory/boms/import' : 'inventory/' + page, body),
                   body.rows ? 'BOM imported and posted.' : 'Record saved.')} cancel={() => setForm(null)} busy={busy} />}
               {detail && <section className="ims-panel ims-form">
-                <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetail(null)}>Close details</button></div>
+                <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetailId(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
+                {page === 'boms' && canWrite(session.role, 'boms') && <BomComponentEditor key={detail.id} bom={detail}
+                  items={data.records.items} busy={busy}
+                  save={(fields) => run(() => api('inventory/boms/components', fields), 'Component added to ' + detail.number + '.')} />}
                 {detail.lines && (page === 'boms' ? (
                   <BomStockPlan key={detail.id} reference={detail.number} project={render('project', detail)}
                     lines={detail.lines} balances={stockRows}
@@ -699,10 +768,10 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                   action={spec ? (row) => <div className="ims-actions">
                     <button className="ims-text-button" onClick={() => {
                       setForm(null)
-                      setDetail(row)
+                      setDetailId(row.id)
                       if (page === 'boms') refresh((count) => count + 1)
                     }}>View</button>
-                    {editable.includes(page) && canWrite(session.role, page) && <button className="ims-text-button" onClick={() => { setDetail(null); setForm(row) }}>Edit</button>}
+                    {editable.includes(page) && canWrite(session.role, page) && <button className="ims-text-button" onClick={() => { setDetailId(null); setForm(row) }}>Edit</button>}
                   </div> : undefined} />
               </section>
             </>
