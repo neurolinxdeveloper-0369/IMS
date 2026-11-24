@@ -134,7 +134,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
     ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
   ]
   return (
-    <section className="ims-bom-plan" aria-label="BOM stock plan">
+    <section className={hasWorkbook ? 'ims-bom-plan ims-bom-plan-imported' : 'ims-bom-plan'} aria-label="BOM stock plan">
       <div className="ims-bom-plan-controls">
         <label className="ims-field"><span>Production quantity</span>
           <input type="text" inputMode="numeric" maxLength={9} value={production} aria-invalid={productionUnits === null}
@@ -514,7 +514,7 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
           <span>Inventory Management System</span>
           <div><span>{session.userId} · {roles[session.role]}</span><button type="button" className="ims-button ims-secondary" onClick={logout} disabled={logoutPending}>Log out</button></div>
         </header>
-        <main id="workspace-main" tabIndex={-1} className="ims-main">
+        <main id="workspace-main" tabIndex={-1} className={page === 'boms' && detail ? 'ims-main ims-main-bom' : 'ims-main'}>
           <div className="ims-page-title"><h1>{page === 'password' ? 'Account security' : title}</h1>
             {spec && !form && data && canWrite(session.role, page) && <button className="ims-button" onClick={() => { setDetail(null); setForm({}) }}>New {spec.single}</button>}
             {page === 'users' && !form && <button className="ims-button" onClick={() => setForm({})}>Create account</button>}

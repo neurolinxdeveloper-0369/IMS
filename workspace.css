@@ -44,6 +44,7 @@
 .ims-topbar { min-height: 4rem; background: var(--ims-surface); border-bottom: 1px solid var(--ims-border); display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .75rem clamp(.85rem, 3vw, 2.5rem); font-size: .9rem; font-weight: 650; }
 .ims-topbar > div { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
 .ims-main { max-width: 100rem; margin: 0 auto; padding: clamp(.85rem, 3vw, 2.5rem); }
+.ims-main-bom { max-width: none; padding-inline: clamp(.5rem, 1vw, 1.25rem); }
 .ims-page-title, .ims-panel-title { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; }
 .ims-page-title { margin-bottom: 1.35rem; }
 .ims-page-title h1 { font-size: clamp(1.45rem, 3vw, 2.25rem); letter-spacing: -.04em; line-height: 1.1; margin: 0; }
@@ -76,6 +77,42 @@
 .ims-bom-plan td { vertical-align: top; }
 .ims-table-wrap .ims-bom-shortage td { background: #fff0db; }
 .ims-table-wrap .ims-bom-shortage td:nth-last-child(-n+2) { color: #804213; font-weight: 700; }
+.ims-bom-plan {
+  --ims-first-column: 11rem;
+  --ims-second-column: 9rem;
+}
+.ims-bom-plan-imported {
+  --ims-first-column: 3.75rem;
+  --ims-second-column: clamp(7rem, 9vw, 10rem);
+}
+.ims-bom-plan .ims-table-wrap { isolation: isolate; }
+.ims-bom-plan .ims-table-wrap :is(th, td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ims-bom-plan .ims-table-wrap :is(th, td):nth-child(-n+2) {
+  position: sticky;
+  z-index: 1;
+}
+.ims-bom-plan .ims-table-wrap :is(th, td):first-child {
+  left: 0;
+  width: var(--ims-first-column);
+  min-width: var(--ims-first-column);
+  max-width: var(--ims-first-column);
+}
+.ims-bom-plan .ims-table-wrap :is(th, td):nth-child(2) {
+  left: var(--ims-first-column);
+  min-width: var(--ims-second-column);
+  max-width: var(--ims-second-column);
+  box-shadow: 1px 0 var(--ims-border);
+}
+.ims-bom-plan tbody tr:not(.ims-bom-shortage) td:nth-child(-n+2) { background: var(--ims-surface); }
+.ims-bom-plan .ims-table-wrap table { min-width: 48rem; }
+.ims-bom-plan-imported .ims-table-wrap table { min-width: 84rem; }
+@media (max-width: 720px) {
+  .ims-bom-plan { --ims-first-column: 6rem; --ims-second-column: 6rem; }
+  .ims-bom-plan-imported { --ims-first-column: 3rem; }
+}
 .ims-bom-upload { margin: .85rem 0; padding: .85rem; border: 1px solid var(--ims-border); border-radius: .5rem; }
 .ims-bom-upload .ims-field { margin-bottom: 0; }
 .ims-bom-upload h3 { margin: .55rem 0; font-size: 1rem; overflow-wrap: anywhere; }
