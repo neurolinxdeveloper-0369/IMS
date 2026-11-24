@@ -69,6 +69,12 @@
 .ims-table-wrap :is(th, td) { text-align: left; padding: .7rem .6rem; border-bottom: 1px solid var(--ims-border); vertical-align: middle; white-space: nowrap; }
 .ims-table-wrap th { color: var(--ims-muted); background: #f7f8f5; }
 .ims-table-wrap tr:last-child td { border-bottom: 0; }
+.ims-bom-plan-controls { display: flex; flex-wrap: wrap; gap: .35rem 1rem; }
+.ims-bom-plan-controls .ims-field { width: min(100%, 14rem); }
+.ims-bom-plan-note { color: var(--ims-muted); margin: 0 0 .75rem; }
+.ims-bom-plan-status { font-weight: 650; margin: .65rem 0; }
+.ims-table-wrap .ims-bom-shortage td { background: #fff0db; }
+.ims-table-wrap .ims-bom-shortage td:nth-last-child(-n+2) { color: #804213; font-weight: 700; }
 .ims-empty { color: var(--ims-muted); margin: .8rem 0; }
 .ims-low { color: #91382a; font-weight: 650; }
 .ims-form { margin-bottom: 1rem; }

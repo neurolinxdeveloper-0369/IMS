@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { canRead, canWrite, roles, sections } from './inventory-shared.mjs'
+import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
 import './workspace.css'
 
 const groups = {
@@ -73,20 +73,77 @@ function formatCell(key, value, row, data, page) {
   return value ?? '—'
 }
 
-function Table({ rows, columns, renderCell = (key, row) => row[key], action, empty = 'No records yet.' }) {
+function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, action, empty = 'No records yet.' }) {
   if (!rows.length) return <p className="ims-empty">{empty}</p>
   return (
     <div className="ims-table-wrap">
       <table>
         <thead><tr>{columns.map(([key, label]) => <th key={key} scope="col">{label}</th>)}{action && <th scope="col">Actions</th>}</tr></thead>
         <tbody>{rows.map((row) => (
-          <tr key={row.id ?? row.userId}>
+          <tr key={row.id ?? row.userId} className={rowClassName?.(row)}>
             {columns.map(([key]) => <td key={key}>{renderCell(key, row)}</td>)}
             {action && <td>{action(row)}</td>}
           </tr>
         ))}</tbody>
       </table>
     </div>
+  )
+}
+
+const stockNumber = new Intl.NumberFormat('en-IN')
+
+function formatStockThousandths(value) {
+  if (value === null) return '—'
+  const absolute = value < 0n ? -value : value
+  const fraction = (absolute % 1000n).toString().padStart(3, '0').replace(/0+$/, '')
+  return (value < 0n ? '−' : '') + stockNumber.format(absolute / 1000n) + (fraction ? '.' + fraction : '')
+}
+
+function BomStockPlan({ lines, balances }) {
+  const [production, setProduction] = useState('1')
+  const [bomBasis, setBomBasis] = useState('1')
+  const productionUnits = wholeProductionUnits(production)
+  const bomUnits = wholeProductionUnits(bomBasis)
+  const stockByItem = new Map(balances.map((item) => [String(item.id), item]))
+  const rows = lines.map((line) => {
+    const item = stockByItem.get(String(line.item))
+    return {
+      id: line.item,
+      sku: item?.code ?? '—',
+      name: item?.name ?? '—',
+      unit: item?.unit ?? '—',
+      quantity: line.quantity,
+      ...planBomLine(line.quantity, item?.quantity, productionUnits, bomUnits),
+    }
+  })
+  const shortCount = rows.filter((row) => row.shortage > 0n).length
+  const valid = productionUnits !== null && bomUnits !== null
+  const columns = [
+    ['sku', 'SKU'], ['name', 'Item'], ['unit', 'Unit'],
+    ['quantity', bomUnits === 1n ? 'Qty / unit' : 'BOM quantity'],
+    ['stock', 'Current stock'], ['total', 'Total needed'],
+    ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
+  ]
+  return (
+    <section className="ims-bom-plan" aria-label="BOM stock plan">
+      <div className="ims-bom-plan-controls">
+        <label className="ims-field"><span>Production quantity</span>
+          <input type="text" inputMode="numeric" maxLength={9} value={production} aria-invalid={productionUnits === null}
+            onChange={(event) => setProduction(event.target.value)} />
+        </label>
+        <label className="ims-field"><span>Units covered by this BOM</span>
+          <input type="text" inputMode="numeric" maxLength={9} value={bomBasis} aria-invalid={bomUnits === null}
+            onChange={(event) => setBomBasis(event.target.value)} />
+        </label>
+      </div>
+      <p className="ims-bom-plan-note">Use 1 for a per-unit BOM. For a BOM already entered as a batch, enter the number of units it covers.</p>
+      <p className="ims-bom-plan-status" role="status">
+        {!valid ? 'Enter positive whole numbers for both quantities.'
+          : shortCount ? `${shortCount} of ${rows.length} items short for this run.` : 'No shortages in known stock.'}
+      </p>
+      <Table rows={rows} columns={columns} rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
+        renderCell={(key, row) => typeof row[key] === 'bigint' || row[key] === null ? formatStockThousandths(row[key]) : row[key]} />
+    </section>
   )
 }
 
@@ -390,16 +447,24 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
               {detail && <section className="ims-panel ims-form">
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetail(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
-                {detail.lines && <Table rows={detail.lines.map((line) => ({ ...line, id: line.item }))}
-                  columns={ [['item', 'Item'], ['quantity', 'Quantity'], ...(detail.lines.some((line) => line.price !== undefined) ? [['price', 'Unit price (INR)']] : [])] }
-                  renderCell={(key, row) => key === 'item' ? (row.code ? row.code + ' · ' + row.name : labelFor(data.records.items.find((item) => item.id === row.item))) : row[key]} />}
+                {detail.lines && (page === 'boms' ? (
+                  <BomStockPlan key={detail.id} lines={detail.lines} balances={stockRows} />
+                ) : (
+                  <Table rows={detail.lines.map((line) => ({ ...line, id: line.item }))}
+                    columns={ [['item', 'Item'], ['quantity', 'Quantity'], ...(detail.lines.some((line) => line.price !== undefined) ? [['price', 'Unit price (INR)']] : [])] }
+                    renderCell={(key, row) => key === 'item' ? (row.code ? row.code + ' · ' + row.name : labelFor(data.records.items.find((item) => item.id === row.item))) : row[key]} />
+                ))}
               </section>}
               <section className="ims-panel">
                 <label className="ims-field ims-search"><span>Search {title.toLowerCase()}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
                 <Table rows={searchRows(spec ? data.records[page] : stockRows)} columns={spec?.columns.filter(([key]) => session.role !== 'store_person' || key !== 'total') ?? stockColumns}
                   renderCell={render} empty={search ? 'No matching records.' : 'No records yet.'}
                   action={spec ? (row) => <div className="ims-actions">
-                    <button className="ims-text-button" onClick={() => { setForm(null); setDetail(row) }}>View</button>
+                    <button className="ims-text-button" onClick={() => {
+                      setForm(null)
+                      setDetail(row)
+                      if (page === 'boms') refresh((count) => count + 1)
+                    }}>View</button>
                     {editable.includes(page) && canWrite(session.role, page) && <button className="ims-text-button" onClick={() => { setDetail(null); setForm(row) }}>Edit</button>}
                   </div> : undefined} />
               </section>

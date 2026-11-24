@@ -47,3 +47,30 @@ export function canWrite(role, section) {
 export function canRead(role, section) {
   return role !== 'store_person' || !['quotations', 'invoices'].includes(section)
 }
+
+export function wholeProductionUnits(value) {
+  return /^\d{1,9}$/.test(value) && Number(value) > 0 ? BigInt(value) : null
+}
+
+function stockThousandths(value) {
+  const parts = /^(-?)(\d+)(?:\.(\d{1,3}))?$/.exec(String(value))
+  if (!parts) return null
+  const [, sign, whole, fraction = ''] = parts
+  const amount = BigInt(whole) * 1000n + BigInt(fraction.padEnd(3, '0'))
+  return sign ? -amount : amount
+}
+
+export function planBomLine(bomQuantity, currentStock, productionUnits, bomUnits) {
+  const quantity = stockThousandths(bomQuantity)
+  const stock = stockThousandths(currentStock)
+  const total = quantity === null || productionUnits === null || bomUnits === null
+    ? null
+    : (quantity * productionUnits + bomUnits - 1n) / bomUnits
+  const balance = total === null || stock === null ? null : stock - total
+  return {
+    stock,
+    total,
+    balance,
+    shortage: balance === null ? null : balance < 0n ? -balance : 0n,
+  }
+}
