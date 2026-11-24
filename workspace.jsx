@@ -74,18 +74,31 @@ function formatCell(key, value, row, data, page) {
   return value ?? '—'
 }
 
-function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, action, empty = 'No records yet.' }) {
+function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, empty = 'No records yet.' }) {
   if (!rows.length) return <p className="ims-empty">{empty}</p>
+  const rowGroups = new Map()
+  for (const row of rows) {
+    const group = groupBy?.(row) ?? ''
+    if (!rowGroups.has(group)) rowGroups.set(group, [])
+    rowGroups.get(group).push(row)
+  }
   return (
     <div className="ims-table-wrap">
       <table>
         <thead><tr>{columns.map(([key, label]) => <th key={key} scope="col">{label}</th>)}{action && <th scope="col">Actions</th>}</tr></thead>
-        <tbody>{rows.map((row) => (
-          <tr key={row.id ?? row.userId} className={rowClassName?.(row)}>
-            {columns.map(([key]) => <td key={key}>{renderCell(key, row)}</td>)}
-            {action && <td>{action(row)}</td>}
-          </tr>
-        ))}</tbody>
+        {[...rowGroups].map(([group, members]) => (
+          <tbody key={group}>
+            {group && <tr><th className="ims-table-group-heading" scope="rowgroup" colSpan={columns.length + (action ? 1 : 0)}>
+              <span>{group}</span>
+            </th></tr>}
+            {members.map((row) => (
+              <tr key={row.id ?? row.userId} className={rowClassName?.(row)}>
+                {columns.map(([key]) => <td key={key}>{renderCell(key, row)}</td>)}
+                {action && <td>{action(row)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        ))}
       </table>
     </div>
   )
@@ -112,6 +125,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
     return {
       id,
       sourceRows,
+      category: sourceRows.find((source) => source.category)?.category.replace(/^\d+[.)]\s*/, '').trim(),
       sku: item?.code ?? sourceRows[0]?.sku ?? '—',
       name: item?.name ?? '—',
       quantity,
@@ -121,6 +135,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
   const shortCount = rows.filter((row) => row.shortage > 0n).length
   const valid = productionUnits !== null && bomUnits !== null
   const hasWorkbook = Boolean(sourceRows?.length)
+  const hasCategories = rows.some((row) => row.category)
   const hasGroupedRows = rows.some((row) => row.sourceRows.length > 1)
   const workbookColumns = hasWorkbook ? bomWorkbookColumns
     .filter(([key]) => key !== 'quantity' && (showPrice || key !== 'unitPrice')) : []
@@ -150,6 +165,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
           : shortCount ? `${shortCount} of ${lines.length} items short for this run.` : 'No shortages in known stock.'}
       </p>
       <Table rows={rows} columns={columns} rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
+        groupBy={hasCategories ? (row) => row.category?.toUpperCase() || 'UNCATEGORIZED' : undefined}
         renderCell={(key, row) => {
           if (key.startsWith('source-')) {
             const field = key.slice(7)
