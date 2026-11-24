@@ -96,13 +96,34 @@ export function joinBomPlanningRows(lines, sourceRows = []) {
   return rows
 }
 
-export function excelStockQuantity(thousandths) {
-  if (thousandths == null) return null
+function excelDecimal(value, scale, digits) {
+  if (value == null) return null
   // Excel retains at most 15 significant digits in a numeric cell.
-  if (thousandths >= -999999999999999n && thousandths <= 999999999999999n) {
-    return Number(thousandths) / 1000
+  if (value >= -999999999999999n && value <= 999999999999999n) {
+    return Number(value) / Number(scale)
   }
-  const absolute = thousandths < 0n ? -thousandths : thousandths
-  const fraction = (absolute % 1000n).toString().padStart(3, '0').replace(/0+$/, '')
-  return (thousandths < 0n ? '-' : '') + absolute / 1000n + (fraction ? '.' + fraction : '')
+  const absolute = value < 0n ? -value : value
+  const fraction = (absolute % scale).toString().padStart(digits, '0').replace(/0+$/, '')
+  return (value < 0n ? '-' : '') + absolute / scale + (fraction ? '.' + fraction : '')
+}
+
+export function excelStockQuantity(thousandths) {
+  return excelDecimal(thousandths, 1000n, 3)
+}
+
+export function excelRequiredAmount(cents) {
+  return excelDecimal(cents, 100n, 2)
+}
+
+export function requiredBomAmount(shortage, sourceRows) {
+  if (shortage === null) return null
+  if (shortage === 0n) return 0n
+  const mounted = sourceRows.filter((row) => Number(row.quantity) > 0)
+  const prices = mounted.map((row) => {
+    const match = /^(\d{1,9})(?:\.(\d{1,2}))?$/.exec(String(row.unitPrice))
+    return match ? BigInt(match[1]) * 100n + BigInt((match[2] ?? '').padEnd(2, '0')) : null
+  })
+  const price = prices[0]
+  if (price == null || prices.some((value) => value !== price)) return null
+  return (shortage * price + 500n) / 1000n
 }

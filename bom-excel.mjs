@@ -14,6 +14,7 @@ const columnWidths = {
   total: 16,
   shortage: 18,
   balance: 16,
+  requiredAmount: 21,
 }
 
 function textCell(value, style = {}) {
@@ -22,7 +23,8 @@ function textCell(value, style = {}) {
 
 function dataCell(value, key, style) {
   if (typeof value === 'number' && Number.isFinite(value)) {
-    const format = key === 'source-unitPrice' ? '#,##0.00' : Number.isInteger(value) ? '#,##0' : '#,##0.###'
+    const isInr = key === 'source-unitPrice' || key === 'requiredAmount'
+    const format = isInr ? '#,##0.00' : Number.isInteger(value) ? '#,##0' : '#,##0.###'
     return { value, type: Number, format, ...style }
   }
   return textCell(value, style)
@@ -32,7 +34,7 @@ function mergedCell(cell, span) {
   return [{ ...cell, columnSpan: span }, ...Array(span - 1).fill(null)]
 }
 
-export function createBomExcel({ reference, project, production, bomBasis, columns, rows }) {
+export function createBomExcel({ reference, project, production, bomBasis, columns, rows, totals }) {
   const widths = columns.map(([key]) => columnWidths[key] ?? 18)
   const meta = (label, value) => [
     ...mergedCell(textCell(label, { fontWeight: 'bold', textColor: '#365246', wrap: true, height: 21 }), 2),
@@ -72,10 +74,23 @@ export function createBomExcel({ reference, project, production, bomBasis, colum
         bottomBorderColor: '#E1E6DF',
         bottomBorderStyle: 'thin',
         ...(row.shortage ? { backgroundColor: '#FFF0DB' } : {}),
-        ...(row.shortage && (key === 'shortage' || key === 'balance') ? { fontWeight: 'bold', textColor: '#804213' } : {}),
+        ...(row.shortage && ['shortage', 'balance', 'requiredAmount'].includes(key) ? { fontWeight: 'bold', textColor: '#804213' } : {}),
       }))
     }),
   ]
+  if (totals) {
+    const style = {
+      backgroundColor: '#234A3C',
+      textColor: '#FFFFFF',
+      fontWeight: 'bold',
+      height: 26,
+      alignVertical: 'center',
+    }
+    data.push([
+      ...mergedCell(textCell(totals.label, style), columns.length - 1),
+      dataCell(totals.amount, 'requiredAmount', { ...style, align: 'right' }),
+    ])
+  }
   const safeReference = String(reference ?? '').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
     .trim().slice(0, 120).replace(/[. ]+$/, '')
   const quantitySuffix = /^\d{1,9}$/.test(String(production)) ? `-qty-${production}` : ''

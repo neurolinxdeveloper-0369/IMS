@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
-import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, excelStockQuantity, joinBomPlanningRows, parseBomWorkbookSheet } from './bom-workbook.mjs'
+import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, excelRequiredAmount, excelStockQuantity, joinBomPlanningRows, parseBomWorkbookSheet, requiredBomAmount } from './bom-workbook.mjs'
 import './workspace.css'
 
 const groups = {
@@ -84,7 +84,7 @@ function groupTableRows(rows, groupBy) {
   return rowGroups
 }
 
-function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, scrollLabel, empty = 'No records yet.' }) {
+function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassName, groupBy, action, scrollLabel, footer, empty = 'No records yet.' }) {
   if (!rows.length) return <p className="ims-empty">{empty}</p>
   const rowGroups = groupTableRows(rows, groupBy)
   return (
@@ -105,6 +105,10 @@ function Table({ rows, columns, renderCell = (key, row) => row[key], rowClassNam
             ))}
           </tbody>
         ))}
+        {footer && <tfoot><tr>
+          <th scope="row" colSpan={columns.length - 1}><span>{footer.label}</span></th>
+          <td>{footer.value}</td>
+        </tr></tfoot>}
       </table>
     </div>
   )
@@ -119,6 +123,10 @@ function formatStockThousandths(value) {
   return (value < 0n ? '−' : '') + stockNumber.format(absolute / 1000n) + (fraction ? '.' + fraction : '')
 }
 
+function formatRequiredAmount(cents) {
+  return cents === null ? '—' : '₹' + stockNumber.format(cents / 100n) + '.' + (cents % 100n).toString().padStart(2, '0')
+}
+
 function BomStockPlan({ reference, project, lines, balances, sourceRows, showPrice }) {
   const [production, setProduction] = useState('1')
   const [bomBasis, setBomBasis] = useState('1')
@@ -130,6 +138,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
   const rows = joinBomPlanningRows(lines, sourceRows).map(({ id, line, sourceRows }) => {
     const item = stockByItem.get(String(line?.item))
     const quantity = line?.quantity ?? sourceRows[0]?.quantity
+    const plan = planBomLine(quantity, item?.quantity, productionUnits, bomUnits)
     return {
       id,
       sourceRows,
@@ -137,11 +146,15 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
       sku: item?.code ?? sourceRows[0]?.sku ?? '—',
       name: item?.name ?? '—',
       quantity,
-      ...planBomLine(quantity, item?.quantity, productionUnits, bomUnits),
+      ...plan,
+      requiredAmount: showPrice ? requiredBomAmount(plan.shortage, sourceRows) : null,
     }
   })
   const shortCount = rows.filter((row) => row.shortage > 0n).length
   const valid = productionUnits !== null && bomUnits !== null
+  const incomplete = valid && rows.some((row) => Number(row.quantity) > 0 && row.requiredAmount === null)
+  const grandTotal = valid ? rows.reduce((total, row) => total + (row.requiredAmount ?? 0n), 0n) : null
+  const totalLabel = incomplete ? 'Grand total (priced shortfalls only)' : 'Grand total'
   const hasWorkbook = Boolean(sourceRows?.length)
   const hasCategories = rows.some((row) => row.category)
   const groupBy = hasCategories ? (row) => row.category?.toUpperCase() || 'UNCATEGORIZED' : undefined
@@ -155,6 +168,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
     ['quantity', bomUnits === 1n ? (hasWorkbook ? 'Qty / Card' : 'Qty / unit') : 'BOM quantity'],
     ['stock', 'Current stock'], ['total', 'Total needed'],
     ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
+    ...(showPrice ? [['requiredAmount', 'Required Amount (INR)']] : []),
   ]
 
   async function downloadExcel() {
@@ -175,12 +189,16 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
               return values.length === 1 ? values[0] : values.map((value) => formatWorkbookCell(field, value)).join('\n')
             }
             const value = row[key]
+            if (key === 'requiredAmount') return excelRequiredAmount(value)
             return typeof value === 'bigint' ? excelStockQuantity(value) : value === '—' ? null : value ?? null
           })
           exportRows.push({ cells, shortage: row.shortage > 0n })
         }
       }
-      await downloadBomExcel({ reference, project, production: Number(productionUnits), bomBasis: Number(bomUnits), columns, rows: exportRows })
+      await downloadBomExcel({
+        reference, project, production: Number(productionUnits), bomBasis: Number(bomUnits), columns, rows: exportRows,
+        totals: showPrice ? { label: totalLabel, amount: excelRequiredAmount(grandTotal) } : undefined,
+      })
     } catch {
       setDownloadError('The Excel file could not be generated. Try the download again.')
     } finally {
@@ -208,8 +226,10 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
         {!valid ? 'Enter positive whole numbers for both quantities.'
           : shortCount ? `${shortCount} of ${lines.length} items short for this run.` : 'No shortages in known stock.'}
       </p>
+      {showPrice && incomplete && <p className="ims-bom-plan-note">Rows with unavailable stock or a missing or conflicting unit price are excluded from the total.</p>}
       {downloadError && <p className="ims-error" role="alert">{downloadError}</p>}
       <Table rows={rows} columns={columns} scrollLabel="BOM details table" rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
+        footer={showPrice ? { label: totalLabel, value: formatRequiredAmount(grandTotal) } : undefined}
         groupBy={groupBy}
         renderCell={(key, row) => {
           if (key.startsWith('source-')) {
@@ -218,6 +238,7 @@ function BomStockPlan({ reference, project, lines, balances, sourceRows, showPri
               ? row.sourceRows.map((source, index) => <div key={index}>{formatWorkbookCell(field, source[field])}</div>)
               : '—'
           }
+          if (key === 'requiredAmount') return formatRequiredAmount(row.requiredAmount)
           return typeof row[key] === 'bigint' || row[key] === null ? formatStockThousandths(row[key]) : row[key] ?? '—'
         }} />
     </section>
