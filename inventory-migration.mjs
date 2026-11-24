@@ -158,3 +158,60 @@ export async function migrateInventory(db) {
     INSERT INTO ims_schema_migrations (version) VALUES (1);
   `)
 }
+
+function readShape([kind, table, fields, lines, priced]) {
+  const snapshot = kind === 'closings'
+  const referenceKey = lines || fields.includes(date) ? 'number' : 'code'
+  const sourceColumn = fields.find(([, key]) => key === 'source')?.[0]
+  const columns = fields.flatMap(([column, key, type]) => [
+    "'"+key+"'",
+    'h.' + column + (type.startsWith('bigint') ? '::text' : ''),
+  ])
+  const lineBody = [
+    "'item', l.item_id::text",
+    "'quantity', l.quantity" + (snapshot ? '::text' : ''),
+    ...(priced ? ["'price', l.unit_price"] : []),
+    ...(snapshot ? ["'code', l.item_code", "'name', l.item_name", "'unit', l.unit"] : []),
+  ]
+  const lineValues = lines ? `
+    , 'lines', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(${lineBody.join(', ')}) ORDER BY l.line_number)
+      FROM ${table}_lines l WHERE l.document_id = h.id
+    ), '[]'::jsonb)
+  ` : ''
+  return `
+    SELECT h.id, '${kind}'::text AS kind, h.created_at, ${sourceColumn ? 'h.' + sourceColumn : 'NULL::bigint'} AS source_id,
+      jsonb_strip_nulls(jsonb_build_object('${referenceKey}', h.reference, ${columns.join(', ')}${lineValues})) AS body
+    FROM ${table} h
+  `
+}
+
+export async function migrateInventoryReads(db) {
+  if ((await db.query('SELECT 1 FROM ims_schema_migrations WHERE version = 2')).rowCount) return
+  await db.query(`
+    CREATE VIEW ims_inventory_read AS
+      ${records.map(readShape).join('\nUNION ALL\n')};
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM (
+          SELECT id, kind, created_at, CASE WHEN kind = 'closings' THEN
+            jsonb_set(body, '{lines}', COALESCE((
+              SELECT jsonb_agg(jsonb_set(line, '{quantity}', to_jsonb((line->>'quantity')::numeric(18,3)::text)) ORDER BY position)
+              FROM jsonb_array_elements(body->'lines') WITH ORDINALITY AS entries(line, position)
+            ), '[]'::jsonb))
+          ELSE body END AS body
+          FROM ims_records
+        ) old
+        FULL JOIN ims_inventory_read linked USING (id)
+        WHERE old.kind IS DISTINCT FROM linked.kind
+          OR old.created_at IS DISTINCT FROM linked.created_at
+          OR jsonb_strip_nulls(old.body) IS DISTINCT FROM linked.body
+      ) THEN
+        RAISE EXCEPTION 'Linked inventory differs from original records; no read cutover was applied';
+      END IF;
+    END;
+    $$;
+    INSERT INTO ims_schema_migrations (version) VALUES (2);
+  `)
+}

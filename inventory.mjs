@@ -1,5 +1,5 @@
 import { sections, canRead, canWrite } from './inventory-shared.mjs'
-import { migrateInventory } from './inventory-migration.mjs'
+import { migrateInventory, migrateInventoryReads } from './inventory-migration.mjs'
 
 export async function initInventory(pool) {
   await transaction(pool, async (db) => {
@@ -29,6 +29,7 @@ export async function initInventory(pool) {
     );
     `)
     await migrateInventory(db)
+    await migrateInventoryReads(db)
   })
 }
 
@@ -76,7 +77,7 @@ function fixed(value, scale = 1000) {
 
 async function findRecord(db, kind, id) {
   check(/^\d{1,18}$/.test(String(id)), 'Choose an existing ' + sections[kind].single + '.')
-  const { rows: [row] } = await db.query('SELECT id, body FROM ims_records WHERE kind = $1 AND id = $2', [kind, id])
+  const { rows: [row] } = await db.query('SELECT id::text, body FROM ims_inventory_read WHERE kind = $1 AND id = $2', [kind, id])
   check(row, 'The selected ' + sections[kind].single + ' no longer exists.', 409)
   return { id: row.id, ...row.body }
 }
@@ -122,7 +123,7 @@ async function readLines(db, input, prices) {
 }
 
 async function linked(db, kind, source) {
-  const { rows } = await db.query('SELECT body FROM ims_records WHERE kind = $1 AND body->>\'source\' = $2', [kind, source])
+  const { rows } = await db.query('SELECT body FROM ims_inventory_read WHERE kind = $1 AND source_id = $2', [kind, source])
   return rows.map((row) => row.body)
 }
 
@@ -226,14 +227,14 @@ export async function saveInventory(pool, actor, kind, input) {
     if (['openings', 'issues', 'receipts', 'closings'].includes(kind)) {
       const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kolkata' }).format()
       check(body.date <= today, 'Stock dates cannot be in the future.')
-      const dates = await db.query("SELECT max(body->>'date') AS date FROM ims_records WHERE kind = 'closings'")
+      const dates = await db.query('SELECT max(document_date)::text AS date FROM ims_closing_stock')
       const lastClose = dates.rows[0].date
       check(!lastClose || body.date > lastClose, 'The date must be after the last stock close.', 409)
       if (kind !== 'closings') {
         if (kind === 'issues') {
           const { rows } = await db.query(`
-            SELECT max(r.body->>'date') AS date FROM ims_stock_ledger l
-            JOIN ims_records r ON r.id = l.record_id WHERE l.item_id = ANY($1::bigint[])
+            SELECT max(r.document_date)::text AS date FROM ims_stock_ledger l
+            JOIN ims_stock_documents r ON r.id = l.record_id WHERE l.item_id = ANY($1::bigint[])
           `, [body.lines.map((line) => line.item)])
           check(!rows[0].date || body.date >= rows[0].date, 'Stock issues cannot be backdated before an existing item movement.', 409)
         }
@@ -260,7 +261,7 @@ export async function saveInventory(pool, actor, kind, input) {
 export async function readInventory(pool, actor) {
   const { rows, balances } = await transaction(pool, async (db) => {
     await db.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
-    const { rows } = await db.query('SELECT id, kind, body, created_at AS "createdAt" FROM ims_records ORDER BY id DESC')
+    const { rows } = await db.query('SELECT id::text, kind, body, created_at AS "createdAt" FROM ims_inventory_read ORDER BY ims_inventory_read.id DESC')
     return { rows, balances: await stock(db) }
   })
   const records = Object.fromEntries(Object.keys(sections).map((kind) => [kind, []]))
