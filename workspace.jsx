@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { canRead, canWrite, planBomLine, roles, sections, wholeProductionUnits } from './inventory-shared.mjs'
-import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, parseBomWorkbookSheet } from './bom-workbook.mjs'
+import { bomHeaderIndex, bomSkuColumn, bomWorkbookColumns, joinBomPlanningRows, parseBomWorkbookSheet } from './bom-workbook.mjs'
 import './workspace.css'
 
 const groups = {
@@ -100,28 +100,36 @@ function formatStockThousandths(value) {
   return (value < 0n ? '−' : '') + stockNumber.format(absolute / 1000n) + (fraction ? '.' + fraction : '')
 }
 
-function BomStockPlan({ lines, balances }) {
+function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
   const [production, setProduction] = useState('1')
   const [bomBasis, setBomBasis] = useState('1')
   const productionUnits = wholeProductionUnits(production)
   const bomUnits = wholeProductionUnits(bomBasis)
   const stockByItem = new Map(balances.map((item) => [String(item.id), item]))
-  const rows = lines.map((line) => {
-    const item = stockByItem.get(String(line.item))
+  const rows = joinBomPlanningRows(lines, sourceRows).map(({ id, line, sourceRows }) => {
+    const item = stockByItem.get(String(line?.item))
+    const quantity = line?.quantity ?? sourceRows[0]?.quantity
     return {
-      id: line.item,
-      sku: item?.code ?? '—',
+      id,
+      sourceRows,
+      sku: item?.code ?? sourceRows[0]?.sku ?? '—',
       name: item?.name ?? '—',
       unit: item?.unit ?? '—',
-      quantity: line.quantity,
-      ...planBomLine(line.quantity, item?.quantity, productionUnits, bomUnits),
+      quantity,
+      ...planBomLine(quantity, item?.quantity, productionUnits, bomUnits),
     }
   })
   const shortCount = rows.filter((row) => row.shortage > 0n).length
   const valid = productionUnits !== null && bomUnits !== null
+  const hasWorkbook = Boolean(sourceRows?.length)
+  const hasGroupedRows = rows.some((row) => row.sourceRows.length > 1)
+  const workbookColumns = hasWorkbook ? bomWorkbookColumns
+    .filter(([key]) => key !== 'quantity' && (showPrice || key !== 'unitPrice')) : []
   const columns = [
+    ...workbookColumns.map(([key, label]) => ['source-' + key, label]),
+    ...(hasGroupedRows ? [['source-quantity', 'Workbook qty / card']] : []),
     ['sku', 'SKU'], ['name', 'Item'], ['unit', 'Unit'],
-    ['quantity', bomUnits === 1n ? 'Qty / unit' : 'BOM quantity'],
+    ['quantity', bomUnits === 1n ? (hasWorkbook ? 'Qty / Card' : 'Qty / unit') : 'BOM quantity'],
     ['stock', 'Current stock'], ['total', 'Total needed'],
     ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
   ]
@@ -140,23 +148,31 @@ function BomStockPlan({ lines, balances }) {
       <p className="ims-bom-plan-note">Use 1 for a per-unit BOM. For a BOM already entered as a batch, enter the number of units it covers.</p>
       <p className="ims-bom-plan-status" role="status">
         {!valid ? 'Enter positive whole numbers for both quantities.'
-          : shortCount ? `${shortCount} of ${rows.length} items short for this run.` : 'No shortages in known stock.'}
+          : shortCount ? `${shortCount} of ${lines.length} items short for this run.` : 'No shortages in known stock.'}
       </p>
       <Table rows={rows} columns={columns} rowClassName={(row) => row.shortage > 0n ? 'ims-bom-shortage' : undefined}
-        renderCell={(key, row) => typeof row[key] === 'bigint' || row[key] === null ? formatStockThousandths(row[key]) : row[key]} />
+        renderCell={(key, row) => {
+          if (key.startsWith('source-')) {
+            const field = key.slice(7)
+            return row.sourceRows.length
+              ? row.sourceRows.map((source, index) => <div key={index}>{formatWorkbookCell(field, source[field])}</div>)
+              : '—'
+          }
+          return typeof row[key] === 'bigint' || row[key] === null ? formatStockThousandths(row[key]) : row[key] ?? '—'
+        }} />
     </section>
   )
 }
 
-function BomWorkbookTable({ rows, showPrice = true, showSku = false }) {
-  const columns = bomWorkbookColumns.filter(([key]) => showPrice || key !== 'unitPrice')
-  if (showSku) columns.push(bomSkuColumn)
+function formatWorkbookCell(key, value) {
+  if (value === '' || value == null) return '—'
+  return key === 'unitPrice' && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : value
+}
+
+function BomWorkbookTable({ rows, showSku = false }) {
+  const columns = showSku ? [...bomWorkbookColumns, bomSkuColumn] : bomWorkbookColumns
   return <Table rows={rows} columns={columns}
-    renderCell={(key, row) => {
-      const value = row[key]
-      if (value === '' || value == null) return '—'
-      return key === 'unitPrice' && Number.isFinite(Number(value)) ? Number(value).toFixed(2) : value
-    }} />
+    renderCell={(key, row) => formatWorkbookCell(key, row[key])} />
 }
 
 function Field({ field, data, value, onChange }) {
@@ -534,17 +550,13 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetail(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
                 {detail.lines && (page === 'boms' ? (
-                  <BomStockPlan key={detail.id} lines={detail.lines} balances={stockRows} />
+                  <BomStockPlan key={detail.id} lines={detail.lines} balances={stockRows}
+                    sourceRows={detail.sourceRows} showPrice={session.role !== 'store_person'} />
                 ) : (
                   <Table rows={detail.lines.map((line) => ({ ...line, id: line.item }))}
                     columns={ [['item', 'Item'], ['quantity', 'Quantity'], ...(detail.lines.some((line) => line.price !== undefined) ? [['price', 'Unit price (INR)']] : [])] }
                     renderCell={(key, row) => key === 'item' ? (row.code ? row.code + ' · ' + row.name : labelFor(data.records.items.find((item) => item.id === row.item))) : row[key]} />
                 ))}
-                {page === 'boms' && detail.sourceRows?.length > 0 && <section className="ims-bom-upload">
-                  <h3>Workbook rows</h3>
-                  <BomWorkbookTable rows={detail.sourceRows.map((row, index) => ({ ...row, id: index }))}
-                    showPrice={session.role !== 'store_person'} showSku />
-                </section>}
               </section>}
               <section className="ims-panel">
                 <label className="ims-field ims-search"><span>Search {title.toLowerCase()}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>

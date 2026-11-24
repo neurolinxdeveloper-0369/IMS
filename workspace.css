@@ -73,6 +73,7 @@
 .ims-bom-plan-controls .ims-field { width: min(100%, 14rem); }
 .ims-bom-plan-note { color: var(--ims-muted); margin: 0 0 .75rem; }
 .ims-bom-plan-status { font-weight: 650; margin: .65rem 0; }
+.ims-bom-plan td { vertical-align: top; }
 .ims-table-wrap .ims-bom-shortage td { background: #fff0db; }
 .ims-table-wrap .ims-bom-shortage td:nth-last-child(-n+2) { color: #804213; font-weight: 700; }
 .ims-bom-upload { margin: .85rem 0; padding: .85rem; border: 1px solid var(--ims-border); border-radius: .5rem; }

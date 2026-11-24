@@ -75,3 +75,23 @@ export function parseBomWorkbookSheet(data) {
   if (rows.length && !rows.some((row) => Number(row.quantity) > 0)) errors.push('At least one row needs a Qty / Card greater than zero.')
   return { rows, errors }
 }
+
+export function joinBomPlanningRows(lines, sourceRows = []) {
+  const byItem = new Map(lines.map((line) => [String(line.item), {
+    id: 'item-' + line.item, line, sourceRows: [],
+  }]))
+  const rows = []
+  for (const [index, source] of sourceRows.entries()) {
+    const row = byItem.get(String(source.item))
+    if (!row) {
+      rows.push({ id: 'source-' + index, sourceRows: [source] })
+      continue
+    }
+    if (!row.sourceRows.length) rows.push(row)
+    row.sourceRows.push(source)
+  }
+  for (const row of byItem.values()) {
+    if (!row.sourceRows.length) rows.push(row)
+  }
+  return rows
+}
