@@ -114,7 +114,6 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
       sourceRows,
       sku: item?.code ?? sourceRows[0]?.sku ?? '—',
       name: item?.name ?? '—',
-      unit: item?.unit ?? '—',
       quantity,
       ...planBomLine(quantity, item?.quantity, productionUnits, bomUnits),
     }
@@ -128,7 +127,7 @@ function BomStockPlan({ lines, balances, sourceRows, showPrice }) {
   const columns = [
     ...workbookColumns.map(([key, label]) => ['source-' + key, label]),
     ...(hasGroupedRows ? [['source-quantity', 'Workbook qty / card']] : []),
-    ['sku', 'SKU'], ['name', 'Item'], ['unit', 'Unit'],
+    ['sku', 'SKU'], ['name', 'Item'],
     ['quantity', bomUnits === 1n ? (hasWorkbook ? 'Qty / Card' : 'Qty / unit') : 'BOM quantity'],
     ['stock', 'Current stock'], ['total', 'Total needed'],
     ['shortage', 'Required (shortfall)'], ['balance', 'Stock balance'],
