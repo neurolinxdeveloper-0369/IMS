@@ -155,6 +155,7 @@
 .ims-line + .ims-line { padding-top: .65rem; border-top: 1px solid var(--ims-border); }
 .ims-line > button { margin-bottom: .65rem; }
 .ims-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+.ims-component-item-source { margin-bottom: .75rem; }
 .ims-form dl { display: grid; grid-template-columns: minmax(7rem, max-content) 1fr; gap: .45rem .7rem; overflow-wrap: anywhere; }
 .ims-form dt { font-weight: 650; }
 .ims-form dd { margin: 0; }

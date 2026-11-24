@@ -285,8 +285,9 @@ function Field({ field, data, value, onChange }) {
   )
 }
 
-function BomComponentEditor({ bom, items, add, rename, busy }) {
+function BomComponentEditor({ bom, items, add, rename, canCreateItem, busy }) {
   const [mode, setMode] = useState('')
+  const [creatingItem, setCreatingItem] = useState(false)
   const [search, setSearch] = useState('')
   const [itemId, setItemId] = useState('')
   const [name, setName] = useState('')
@@ -294,12 +295,15 @@ function BomComponentEditor({ bom, items, add, rename, busy }) {
   const componentLines = new Map(bom.lines.map((line) => [line.item, line]))
   const availableItems = items.filter((item) => componentLines.has(item.id) === renaming)
     .map((item) => ({ ...item, name: componentLines.get(item.id)?.displayName ?? item.name }))
-  const query = search.trim().toLowerCase()
+  const searchText = search.trim()
+  const query = searchText.toLowerCase()
   const matches = query ? availableItems.filter((item) => matchesItemSearch(item, query)) : availableItems
   const selected = availableItems.find((item) => item.id === itemId)
+  const newItemDefaults = { code: /^[\w.-]*\d[\w.-]*$/.test(searchText) ? searchText : '', unit: 'ea', minimum: '0' }
 
   function close() {
     setMode('')
+    setCreatingItem(false)
     setSearch('')
     setItemId('')
     setName('')
@@ -315,29 +319,44 @@ function BomComponentEditor({ bom, items, add, rename, busy }) {
   return <form className="ims-form" onSubmit={async (event) => {
     event.preventDefault()
     const fields = Object.fromEntries(new FormData(event.currentTarget))
+    if (creatingItem) {
+      const { code, name, unit, minimum, ...component } = fields
+      if (await add({ ...component, bomId: bom.id, newItem: { code, name, unit, minimum } })) close()
+      return
+    }
     const save = renaming ? rename : add
     if (await save({ ...fields, bomId: bom.id })) close()
   }}>
     <fieldset className="ims-lines" disabled={busy}>
       <legend>{renaming ? 'Rename component' : 'Add component'}</legend>
       {renaming && <p className="ims-empty">The name applies to this BOM and its Excel download.</p>}
-      {!renaming && !availableItems.length && <p className="ims-empty">Add the component to the Items catalog first.</p>}
+      {!renaming && canCreateItem && <div className="ims-actions ims-component-item-source">
+        <button className={'ims-button' + (creatingItem ? ' ims-secondary' : '')} type="button"
+          aria-pressed={!creatingItem} onClick={() => setCreatingItem(false)}>Use existing item</button>
+        <button className={'ims-button' + (creatingItem ? '' : ' ims-secondary')} type="button"
+          aria-pressed={creatingItem} onClick={() => setCreatingItem(true)}>Create new item</button>
+      </div>}
+      {!renaming && !creatingItem && !availableItems.length && <p className="ims-empty">No unused catalog items are available for this BOM.</p>}
       <div className="ims-form-grid">
-        <label className="ims-field"><span>Search item</span>
-          <input type="search" placeholder="SKU or item name" value={search} onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} />
-        </label>
-        <label className="ims-field"><span>Item</span>
-          <select name="item" value={selected?.id ?? ''} required onChange={(event) => {
-            const nextItem = event.target.value
-            setItemId(nextItem)
-            if (renaming) setName(availableItems.find((item) => item.id === nextItem)?.name ?? '')
-          }}>
-            <option value="">{query && !matches.length ? 'No matching items' : 'Select an item'}</option>
-            {selected && !matches.includes(selected) && <option value={selected.id}>{labelFor(selected)}</option>}
-            {matches.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
-          </select>
-        </label>
+        {creatingItem ? sections.items.fields.map((field) => (
+          <Field key={field[0]} field={field} value={newItemDefaults[field[0]]} />
+        )) : <>
+          <label className="ims-field"><span>Search item</span>
+            <input type="search" placeholder="SKU or item name" value={search} onChange={(event) => setSearch(event.target.value)}
+              onKeyDown={(event) => { if (event.key === 'Enter') event.preventDefault() }} />
+          </label>
+          <label className="ims-field"><span>Item</span>
+            <select name="item" value={selected?.id ?? ''} required onChange={(event) => {
+              const nextItem = event.target.value
+              setItemId(nextItem)
+              if (renaming) setName(availableItems.find((item) => item.id === nextItem)?.name ?? '')
+            }}>
+              <option value="">{query && !matches.length ? 'No matching items' : 'Select an item'}</option>
+              {selected && !matches.includes(selected) && <option value={selected.id}>{labelFor(selected)}</option>}
+              {matches.map((item) => <option key={item.id} value={item.id}>{labelFor(item)}</option>)}
+            </select>
+          </label>
+        </>}
         {renaming ? <label className="ims-field"><span>Component name</span>
           <input name="name" value={name} onChange={(event) => setName(event.target.value)} maxLength={240} required disabled={!selected} />
         </label> : <>
@@ -358,8 +377,8 @@ function BomComponentEditor({ bom, items, add, rename, busy }) {
         </label>)}
       </div>}
       <div className="ims-actions">
-        <button className="ims-button" disabled={!selected || (renaming && !name.trim())}>
-          {renaming ? 'Save name' : 'Save component'}
+        <button className="ims-button" disabled={!creatingItem && (!selected || (renaming && !name.trim()))}>
+          {renaming ? 'Save name' : creatingItem ? 'Create item and add to BOM' : 'Save component'}
         </button>
         <button className="ims-button ims-secondary" type="button" onClick={close}>Cancel</button>
       </div>
@@ -769,8 +788,9 @@ export function Workspace({ session, onSession, logout, logoutStatus, logoutPend
                 <div className="ims-panel-title"><h2>{labelFor(detail)}</h2><button className="ims-text-button" onClick={() => setDetailId(null)}>Close details</button></div>
                 <dl>{spec.fields.map(([key, label]) => <React.Fragment key={key}><dt>{label}</dt><dd>{render(key, detail)}</dd></React.Fragment>)}</dl>
                 {page === 'boms' && canWrite(session.role, 'boms') && <BomComponentEditor key={'component-' + detail.id} bom={detail}
-                  items={data.records.items} busy={busy}
-                  add={(fields) => run(() => api('inventory/boms/components', fields), 'Component added to ' + detail.number + '.')}
+                  items={data.records.items} canCreateItem={canWrite(session.role, 'items')} busy={busy}
+                  add={(fields) => run(() => api('inventory/boms/components', fields),
+                    (fields.newItem ? 'Item created and added to ' : 'Component added to ') + detail.number + '.')}
                   rename={(fields) => run(() => api('inventory/boms/components/rename', fields), 'Component renamed in ' + detail.number + '.')} />}
                 {detail.lines && (page === 'boms' ? (
                   <BomStockPlan key={detail.id} reference={detail.number} project={render('project', detail)}

@@ -211,14 +211,37 @@ export async function importBom(pool, actor, input) {
 
 export async function addBomComponent(pool, actor, input) {
   check(canWrite(actor.role, 'boms'), 'You do not have permission for this action.', 403)
+  check(input && typeof input === 'object' && !Array.isArray(input), 'Enter a valid BOM component.')
+  const creatingItem = Object.hasOwn(input, 'newItem')
+  check(creatingItem !== Object.hasOwn(input, 'item'), 'Choose an existing item or enter one new catalog item.')
+  if (creatingItem) {
+    check(canWrite(actor.role, 'items'), 'You do not have permission to create catalog items.', 403)
+    check(input.newItem && typeof input.newItem === 'object' && !Array.isArray(input.newItem), 'Enter a valid catalog item.')
+  }
+
   return transaction(pool, async (db) => {
     await db.query('SELECT pg_advisory_xact_lock(3140322)')
-    const bom = await findRecord(db, 'boms', input?.bomId)
-    const item = await findRecord(db, 'items', input?.item)
-    check(!bom.lines.some((line) => line.item === item.id), 'This item is already on the BOM.', 409)
+    const bom = await findRecord(db, 'boms', input.bomId)
+    const item = creatingItem
+      ? await readFields(db, 'items', {
+        ...input.newItem,
+        minimum: typeof input.newItem.minimum === 'number' ? String(input.newItem.minimum) : input.newItem.minimum,
+      })
+      : await findRecord(db, 'items', input.item)
+    if (!creatingItem) {
+      check(!bom.lines.some((line) => line.item === item.id), 'This item is already on the BOM.', 409)
+    }
     check(bom.lines.length < 100, 'A BOM can contain up to 100 items.', 409)
     const row = parseBomSourceRow({ ...input, sku: item.code, name: item.name }, 'BOM component')
     check(row.quantity > 0, 'BOM component quantity must be greater than zero.')
+    if (creatingItem) {
+      check(!item.unit.includes('\0'), 'Enter a valid unit of measure.')
+      const existing = await db.query('SELECT 1 FROM ims_items WHERE reference = $1', [item.code])
+      check(!existing.rowCount, 'That SKU already exists. Select Use existing item to choose it.', 409)
+      const created = await insertInventoryRecord(db, actor, 'items', item)
+      item.id = String(created.id)
+      await audit(db, actor.userId, 'Created item', item.code)
+    }
 
     const { rows: [source] } = await db.query(`
       SELECT max(row_number) AS last_row FROM ims_bom_source_rows WHERE bom_id = $1
